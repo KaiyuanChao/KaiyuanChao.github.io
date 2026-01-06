@@ -1,0 +1,3471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fractal Attractor Generator</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; font-family: sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #controls {
+            position: absolute; top: 10px; right: 10px;
+            background: rgba(0, 0, 0, 0.8); color: #eee;
+            padding: 15px; border-radius: 8px;
+            width: 300px; backdrop-filter: blur(5px);
+            border: 1px solid #444;
+        }
+        .control-group { margin-bottom: 12px; }
+        label { display: flex; justify-content: space-between; font-size: 12px; color: #aaa; }
+        input[type="range"] { width: 100%; margin-top: 5px; cursor: pointer; }
+        /* Teal accent color for abcd parameter sliders */
+        #param-a, #param-b, #param-c, #param-d {
+            accent-color: #1b9791;
+        }
+        .val-display { color: #fff; font-family: monospace; }
+        button {
+            background: #444; color: #fff; border: 1px solid #666;
+            padding: 8px 16px; cursor: pointer; border-radius: 4px;
+            width: 100%; margin-top: 5px;
+        }
+        button:hover { background: #555; }
+        h1 { margin: 0 0 15px 0; font-size: 18px; color: #4a9eff; }
+        .preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <h1>Fractal Attractor Generator</h1>
+        
+        <div class="control-group">
+            <label>Variable A <span id="val-a" class="val-display"></span></label>
+            <input type="range" id="param-a" min="-4.0" max="4.0" step="0.001">
+        </div>
+        <div class="control-group">
+            <label>Variable B <span id="val-b" class="val-display"></span></label>
+            <input type="range" id="param-b" min="-4.0" max="4.0" step="0.001">
+        </div>
+        <div class="control-group">
+            <label>Variable C <span id="val-c" class="val-display"></span></label>
+            <input type="range" id="param-c" min="-4.0" max="4.0" step="0.001">
+        </div>
+        <div class="control-group">
+            <label>Variable D <span id="val-d" class="val-display"></span></label>
+            <input type="range" id="param-d" min="-4.0" max="4.0" step="0.001">
+        </div>
+
+        <div class="control-group">
+            <label>Exposure (Brightness) <span id="val-exp" class="val-display"></span></label>
+            <input type="range" id="param-exposure" min="0" max="100" step="1" value="83">
+        </div>
+        <div class="control-group">
+            <label>Gamma <span id="val-gamma" class="val-display"></span></label>
+            <input type="range" id="param-gamma" min="0" max="100" step="1" value="50">
+        </div>
+        <div class="control-group">
+            <label>Contrast <span id="val-contrast" class="val-display"></span></label>
+            <input type="range" id="param-contrast" min="0" max="100" step="1" value="83">
+        </div>
+        <!-- Supersampling control disabled. Code preserved for future use. -->
+        <!--
+        <div class="control-group">
+            <label>Supersampling <span id="val-ss" class="val-display"></span></label>
+            <input type="number" id="param-ss" min="1" max="8" step="1" value="1" style="width: 100%; padding: 4px; background: #222; color: #fff; border: 1px solid #444; border-radius: 4px;">
+        </div>
+        -->
+
+        <div class="control-group" style="margin-top: 10px;">
+            <label>Preset</label>
+            <select id="select-preset" style="width: 100%; padding: 4px; background: #222; color: #fff; border: 1px solid #444; border-radius: 4px; margin-top: 5px;">
+                <option value="0">None</option>
+                <option value="1">Classic</option>
+                <option value="2">Swirl</option>
+                <option value="3">Dream</option>
+                <option value="4">Chaos</option>
+                <option value="5">Spiral</option>
+                <option value="6">Vortex</option>
+            </select>
+        </div>
+
+        <div style="display: flex; gap: 5px; margin-top: 10px;">
+            <button id="btn-rebase" style="flex: 1; background: #5a5;">Rebase</button>
+            <button id="btn-reset" style="flex: 1; background: #4d6a4d;">Reset</button>
+        </div>
+
+        <button id="btn-toggle" style="background: #2a5; margin-top: 10px; font-weight: bold; font-size: 14px;">RUNNING</button>
+        <button id="btn-randomize" style="background: #6a5a7a; margin-top: 5px;">Randomize</button>
+        <button id="btn-attract" style="background: #7a5a6a; margin-top: 5px;">Attract Mode</button>
+        <button id="btn-clear" style="background: #555; margin-top: 5px;">Clear</button>
+        <button id="btn-save-screen" style="width: 100%; margin-top: 5px;">Save Screen</button>
+        <button id="btn-load" style="background: #2a7; margin-top: 5px; width: 100%;">Load Fractal from PNG</button>
+        <input type="file" id="file-input" accept="image/png" style="display: none;">
+        <div class="control-group" style="margin-top: 10px;">
+            <label>Color Mode</label>
+            <select id="select-color-mode" style="width: 100%; padding: 4px; background: #222; color: #fff; border: 1px solid #444; border-radius: 4px; margin-top: 5px;">
+                <option value="0">Default</option>
+                <option value="1">Color method Classic</option>
+                <option value="2">Color Exotic</option>
+                <option value="3">Color Vibrant</option>
+                <option value="4">Color Surprise</option>
+                <option value="5">Iteration Hues</option>
+            </select>
+            <!-- Performance note: Default mode (0) uses single buffer. Color modes (1-4) use 4 buffers, increasing memory bandwidth. -->
+        </div>
+        <div style="font-size: 10px; color: #666; margin-top: 10px; text-align: center;">
+            <span id="status-running">Running</span><br>
+            <span id="status-rng">RNG: Sobol (QMC)</span><br>
+            <span id="status-temp" style="color: #4a9eff;"></span><br>
+            <span id="iter-count">0 iterations</span>
+        </div>
+    </div>
+    <canvas id="canvas"></canvas>
+
+<script type="module">
+/**
+ * WEBGPU DUST FRACTAL RENDERER
+ * 
+ * Architecture:
+ * 1. Compute Shader: Calculates millions of iterations of the Peter de Jong attractor.
+ *    Uses atomicAdd to accumulate density into a storage buffer (The "Deep Canvas").
+ * 2. Render Shader: Reads the density buffer, applies log/gamma tone mapping, 
+ *    and renders to screen.
+ */
+
+// --- WGSL Shaders ---
+
+// Load shader files
+async function loadShader(path) {
+    // Add cache-busting query parameter to force fresh load
+    const cacheBuster = `?v=${Date.now()}`;
+    const response = await fetch(path + cacheBuster);
+    if (!response.ok) {
+        throw new Error(`Failed to load shader: ${path}`);
+    }
+    const shaderCode = await response.text();
+    console.log(`Loaded shader: ${path} (${shaderCode.length} bytes)`);
+    // Verify clearMain exists in the loaded code
+    if (path.includes('fractal-accumulation.wgsl') && !shaderCode.includes('clearMain')) {
+        console.error('WARNING: clearMain not found in loaded shader code!');
+        console.error('First 500 chars of shader:', shaderCode.substring(0, 500));
+    }
+    return shaderCode;
+}
+
+// PNG Metadata Helpers - Store fractal state in PNG tEXt chunks
+// PNG chunk structure: [4-byte length][4-byte type][data][4-byte CRC]
+const PNG_SIGNATURE = new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+
+function crc32(data) {
+    let crc = 0xFFFFFFFF;
+    const table = [];
+    for (let i = 0; i < 256; i++) {
+        let c = i;
+        for (let j = 0; j < 8; j++) {
+            c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        }
+        table[i] = c;
+    }
+    for (let i = 0; i < data.length; i++) {
+        crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
+    }
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function writeUint32BE(buffer, offset, value) {
+    buffer[offset] = (value >>> 24) & 0xFF;
+    buffer[offset + 1] = (value >>> 16) & 0xFF;
+    buffer[offset + 2] = (value >>> 8) & 0xFF;
+    buffer[offset + 3] = value & 0xFF;
+}
+
+function readUint32BE(buffer, offset) {
+    return (buffer[offset] << 24) | (buffer[offset + 1] << 16) | (buffer[offset + 2] << 8) | buffer[offset + 3];
+}
+
+// Embed metadata into PNG (works with both Blob and data URL)
+async function embedPNGMetadata(pngSource, metadata) {
+    // Convert Blob or data URL to ArrayBuffer
+    let arrayBuffer;
+    if (pngSource instanceof Blob) {
+        arrayBuffer = await pngSource.arrayBuffer();
+    } else {
+        // Assume it's a data URL
+        const response = await fetch(pngSource);
+        arrayBuffer = await response.arrayBuffer();
+    }
+    const pngData = new Uint8Array(arrayBuffer);
+    
+    // Verify PNG signature
+    for (let i = 0; i < 8; i++) {
+        if (pngData[i] !== PNG_SIGNATURE[i]) {
+            throw new Error('Invalid PNG file');
+        }
+    }
+    
+    // Find IEND chunk (last chunk in PNG)
+    let offset = 8; // Skip PNG signature
+    let iendOffset = -1;
+    
+    // Parse chunks until we find IEND
+    while (offset < pngData.length - 8) { // Need at least 8 bytes for length + type
+        if (offset + 8 > pngData.length) {
+            break; // Not enough data for a chunk header
+        }
+        
+        const length = readUint32BE(pngData, offset);
+        const typeOffset = offset + 4;
+        
+        if (typeOffset + 4 > pngData.length) {
+            break; // Not enough data for chunk type
+        }
+        
+        const type = String.fromCharCode(
+            pngData[typeOffset],
+            pngData[typeOffset + 1],
+            pngData[typeOffset + 2],
+            pngData[typeOffset + 3]
+        );
+        
+        if (type === 'IEND') {
+            iendOffset = offset;
+            break;
+        }
+        
+        // Move to next chunk: length(4) + type(4) + data(length) + CRC(4)
+        const chunkSize = 12 + length;
+        if (offset + chunkSize > pngData.length) {
+            // Chunk extends beyond file - this shouldn't happen in valid PNG
+            console.warn('Chunk extends beyond PNG data, stopping search');
+            break;
+        }
+        
+        offset += chunkSize;
+    }
+    
+    if (iendOffset === -1) {
+        // Fallback: IEND should be the last chunk, so try looking at the end
+        // IEND chunk structure: [0,0,0,0] [I,E,N,D] [CRC(4)]
+        // So it should be at offset = length - 12
+        const lastChunkOffset = pngData.length - 12;
+        if (lastChunkOffset >= 8) {
+            const lastType = String.fromCharCode(
+                pngData[lastChunkOffset + 4],
+                pngData[lastChunkOffset + 5],
+                pngData[lastChunkOffset + 6],
+                pngData[lastChunkOffset + 7]
+            );
+            if (lastType === 'IEND') {
+                iendOffset = lastChunkOffset;
+            }
+        }
+        
+        if (iendOffset === -1) {
+            // Debug: log PNG structure to help diagnose
+            console.error('PNG file size:', pngData.length);
+            console.error('Last 20 bytes:', Array.from(pngData.slice(Math.max(0, pngData.length - 20))).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+            throw new Error('Could not find IEND chunk. PNG may be corrupted or in an unexpected format.');
+        }
+    }
+    
+    // Create metadata chunk
+    const metadataJson = JSON.stringify(metadata);
+    const keyword = 'PlatoDustForge';
+    const textData = keyword + '\0' + metadataJson;
+    const textBytes = new TextEncoder().encode(textData);
+    const chunkLength = textBytes.length;
+    
+    // Create new PNG with metadata chunk inserted before IEND
+    const newPngSize = iendOffset + 12 + chunkLength + 4 + 12; // existing data + tEXt chunk + IEND
+    const newPng = new Uint8Array(newPngSize);
+    newPng.set(pngData.slice(0, iendOffset), 0);
+    
+    // Write tEXt chunk
+    let writeOffset = iendOffset;
+    writeUint32BE(newPng, writeOffset, chunkLength);
+    writeOffset += 4;
+    newPng.set(new TextEncoder().encode('tEXt'), writeOffset);
+    writeOffset += 4;
+    newPng.set(textBytes, writeOffset);
+    writeOffset += chunkLength;
+    
+    // Calculate and write CRC
+    const crcData = new Uint8Array(4 + chunkLength);
+    crcData.set(new TextEncoder().encode('tEXt'), 0);
+    crcData.set(textBytes, 4);
+    const crc = crc32(crcData);
+    writeUint32BE(newPng, writeOffset, crc);
+    writeOffset += 4;
+    
+    // Copy IEND chunk
+    newPng.set(pngData.slice(iendOffset), writeOffset);
+    
+    // Return as Blob (more efficient than data URL)
+    return new Blob([newPng], { type: 'image/png' });
+}
+
+// Extract metadata from PNG file
+async function extractPNGMetadata(file) {
+    const arrayBuffer = await file.arrayBuffer();
+    const pngData = new Uint8Array(arrayBuffer);
+    
+    // Verify PNG signature
+    for (let i = 0; i < 8; i++) {
+        if (pngData[i] !== PNG_SIGNATURE[i]) {
+            throw new Error('Invalid PNG file');
+        }
+    }
+    
+    // Search for tEXt chunk with our keyword
+    let offset = 8;
+    
+    while (offset < pngData.length - 12) {
+        const length = readUint32BE(pngData, offset);
+        const typeOffset = offset + 4;
+        const type = String.fromCharCode(...pngData.slice(typeOffset, typeOffset + 4));
+        
+        if (type === 'tEXt') {
+            const dataOffset = typeOffset + 4;
+            const textData = new TextDecoder().decode(pngData.slice(dataOffset, dataOffset + length));
+            const nullIndex = textData.indexOf('\0');
+            
+            if (nullIndex !== -1) {
+                const keyword = textData.substring(0, nullIndex);
+                const value = textData.substring(nullIndex + 1);
+                
+                if (keyword === 'PlatoDustForge') {
+                    try {
+                        return JSON.parse(value);
+                    } catch (e) {
+                        console.error('Failed to parse metadata:', e);
+                    }
+                }
+            }
+        }
+        
+        if (type === 'IEND') {
+            break;
+        }
+        
+        offset += 12 + length;
+    }
+    
+    return null; // No metadata found
+}
+
+// --- Application Logic ---
+
+// Global WebGPU availability flag
+let webgpuAvailable = false;
+let device = null;
+let context = null;
+
+// CPU-only rendering state (when WebGPU unavailable)
+let cpuDensityBuffer = null;
+let cpuColorBufferR = null;
+let cpuColorBufferG = null;
+let cpuColorBufferB = null;
+let cpuCanvas = null;
+let cpuCtx = null;
+
+async function init() {
+    // Check WebGPU availability
+    webgpuAvailable = !!navigator.gpu;
+    
+    if (!webgpuAvailable) {
+        // Show message but keep UI functional for CPU-only mode
+        const statusTempEl = document.getElementById('status-temp');
+        if (statusTempEl) {
+            statusTempEl.textContent = 'WebGPU not available - using CPU-only mode';
+            statusTempEl.style.color = '#fa5';
+        }
+        
+        // Initialize CPU-only rendering
+        await initCpuOnlyMode();
+        return;
+    }
+
+    // 1. Force High Performance GPU (Crucial for Desktops/Laptops with iGPU)
+    // NOTE: Chrome on Windows may show a warning that powerPreference is ignored (crbug.com/369219127)
+    // This is a known Chrome bug and the warning can be safely ignored - it doesn't affect functionality
+    const adapter = await navigator.gpu.requestAdapter({
+        powerPreference: "high-performance"
+    });
+    
+    if (!adapter) {
+        // Fallback to CPU-only mode
+        const statusTempEl = document.getElementById('status-temp');
+        if (statusTempEl) {
+            statusTempEl.textContent = 'No WebGPU adapter - using CPU-only mode';
+            statusTempEl.style.color = '#fa5';
+        }
+        await initCpuOnlyMode();
+        return;
+    }
+
+    // 2. INSPECT HARDWARE LIMITS
+    const adapterLimits = adapter.limits;
+    
+    // 3. REQUEST HIGHEST POSSIBLE LIMITS
+    // We need to explicitly ask for the max values, otherwise we get 128MB defaults.
+    const requiredLimits = {};
+    
+    // Helper to safely copy limits
+    const copyLimit = (name) => {
+        if (adapterLimits[name]) requiredLimits[name] = adapterLimits[name];
+    };
+    
+    copyLimit('maxStorageBufferBindingSize'); // <--- CRITICAL for 4K/8K Buffers
+    copyLimit('maxBufferSize');
+    copyLimit('maxComputeWorkgroupStorageSize');
+    
+    device = await adapter.requestDevice({
+        requiredLimits: requiredLimits
+    });
+    
+    // Handle device lost errors (GPU crashes/hangs)
+    // Firefox-compatible: check error type more carefully
+    device.addEventListener('uncapturederror', (event) => {
+        console.error('GPU uncaptured error:', event.error);
+        // Firefox may not have GPUDeviceLostError, check error name/reason instead
+        const error = event.error;
+        if (error && (error.constructor.name === 'GPUDeviceLostError' || 
+                      error.name === 'GPUDeviceLostError' ||
+                      (error.reason && (error.reason === 'destroyed' || error.reason === 'unknown')))) {
+            console.error('GPU device lost! Reason:', error.reason || 'unknown');
+            alert('GPU device lost. The GPU driver may have crashed or hung. Please refresh the page.');
+        }
+    });
+    
+    // Get device limits for buffer size checking (now using actual requested limits)
+    const maxBufferSize = device.limits.maxStorageBufferBindingSize || 134217728; // Fallback to 128 MB if not available
+    
+    // Adaptive performance scaling handled in frame loop
+    
+    const canvas = document.getElementById('canvas');
+    context = canvas.getContext('webgpu');
+    
+    // Handle High DPI - use full viewport width and height
+    const dpr = window.devicePixelRatio || 1;
+    // Use full viewport dimensions - canvas extends all the way to left edge
+    let canvasWidth = Math.ceil(window.innerWidth * dpr);
+    let canvasHeight = Math.ceil(window.innerHeight * dpr);
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+    context.configure({
+        device,
+        format: presentationFormat,
+        alphaMode: 'premultiplied',
+    });
+
+    // --- Buffers ---
+
+    // 1. Uniform Params Buffer (Double-buffered to prevent slider interaction blocking)
+    const paramsBufferSize = 27 * 4; // 22 floats + 5 u32 = 27 * 4 bytes (added originalFractal bounds, rngMode, dispatchDimX, workgroupCount, frameOffset)
+    const paramsBufferA = device.createBuffer({
+        size: paramsBufferSize,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    const paramsBufferB = device.createBuffer({
+        size: paramsBufferSize,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    let paramsBufferActive = paramsBufferA; // Currently active buffer (GPU reads from this)
+    let paramsBufferInactive = paramsBufferB; // Inactive buffer (JS writes to this)
+
+    // Function to get render dimensions based on supersampling
+    function getRenderDimensions(supersampling = 1) {
+        if (!webgpuAvailable) {
+            // CPU mode: use canvas dimensions
+            const canvas = document.getElementById('canvas');
+            if (canvas) {
+                return { width: canvas.width, height: canvas.height };
+            }
+            return { width: 800, height: 800 }; // Fallback
+        }
+        // WebGPU mode: use canvas dimensions with supersampling
+        const canvas = document.getElementById('canvas');
+        if (canvas && canvas.width && canvas.height) {
+            return {
+                width: canvas.width * supersampling,
+                height: canvas.height * supersampling
+            };
+        }
+        return { width: 800 * supersampling, height: 800 * supersampling }; // Fallback
+    }
+    
+    // Declare buffer variables first
+    let densityBuffer = null;
+    let colorBufferR = null;
+    let colorBufferG = null;
+    let colorBufferB = null;
+    
+    // Function to calculate maximum safe supersampling level
+    function getMaxSafeSupersampling() {
+        // Each buffer is width * height * 4 bytes (u32)
+        // We need to stay under maxBufferSize per buffer
+        const maxPixels = Math.floor(maxBufferSize / 4);
+        const maxDimension = Math.floor(Math.sqrt(maxPixels));
+        const maxSS = Math.floor(maxDimension / Math.max(canvasWidth, canvasHeight));
+        return Math.max(1, Math.min(8, maxSS));
+    }
+    
+    // Function to create/recreate buffers based on current render dimensions
+    function createBuffers(supersampling = 1) {
+        // Clamp supersampling to safe limit
+        const safeSS = Math.min(supersampling, getMaxSafeSupersampling());
+        if (safeSS < supersampling) {
+            console.warn(`Supersampling ${supersampling}x would exceed buffer limit. Using ${safeSS}x instead.`);
+            if (state) state.supersampling = safeSS;
+        }
+        
+        const renderDims = getRenderDimensions(safeSS);
+        const bufferSize = renderDims.width * renderDims.height * 4 + 4; // +4 bytes avoids perf cliff on nvidia/chrome (must be multiple of 4)
+        
+        // Double-check buffer size doesn't exceed limit
+        if (bufferSize > maxBufferSize) {
+            throw new Error(`Buffer size ${bufferSize} exceeds limit ${maxBufferSize}`);
+        }
+        
+        // Destroy old buffers if they exist
+        if (densityBuffer) densityBuffer.destroy();
+        if (colorBufferR) colorBufferR.destroy();
+        if (colorBufferG) colorBufferG.destroy();
+        if (colorBufferB) colorBufferB.destroy();
+        
+        return {
+            density: device.createBuffer({
+                size: bufferSize,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+            }),
+            colorR: device.createBuffer({
+                size: bufferSize,
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+            }),
+            colorG: device.createBuffer({
+                size: bufferSize,
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+            }),
+            colorB: device.createBuffer({
+                size: bufferSize,
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+            })
+        };
+    }
+    
+    // 2. Density Storage Buffer (The "Deep Canvas")
+    // Initialize with supersampling = 1 (will be updated when state is defined)
+    let buffers = createBuffers(1);
+    densityBuffer = buffers.density;
+    colorBufferR = buffers.colorR;
+    colorBufferG = buffers.colorG;
+    colorBufferB = buffers.colorB;
+
+    // Clear pipeline (to reset density buffer)
+    // Actually, WebGPU queue.writeBuffer is fast enough to zero it out on change.
+
+    // --- Pipelines ---
+
+    // Load main shader
+    const shaderCode = await loadShader('shaders/fractal-accumulation.wgsl');
+    let module;
+    try {
+        // Firefox: add label to avoid empty label error
+        module = device.createShaderModule({ 
+            label: 'mainShader',
+            code: shaderCode 
+        });
+        // Firefox: request compilation info to get detailed error messages
+        if (module.getCompilationInfo) {
+            const compilationInfo = await module.getCompilationInfo();
+            if (compilationInfo.messages && compilationInfo.messages.length > 0) {
+                console.warn('WebGPU compilation info for shader module', compilationInfo);
+                for (const msg of compilationInfo.messages) {
+                    if (msg.type === 'error') {
+                        console.error(`Shader error at line ${msg.lineNum}:${msg.linePos}: ${msg.message}`);
+                    } else if (msg.type === 'warning') {
+                        console.warn(`Shader warning at line ${msg.lineNum}:${msg.linePos}: ${msg.message}`);
+                    }
+                }
+                // If there are errors, throw with details
+                const errors = compilationInfo.messages.filter(m => m.type === 'error');
+                if (errors.length > 0) {
+                    const errorMsg = errors.map(e => `Line ${e.lineNum}:${e.linePos} - ${e.message}`).join('\n');
+                    throw new Error(`Shader compilation failed:\n${errorMsg}`);
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Shader module creation failed:', e);
+        // Try to get compilation info if available (Firefox)
+        if (module && module.getCompilationInfo) {
+            try {
+                const compilationInfo = await module.getCompilationInfo();
+                console.error('WebGPU compilation info:', compilationInfo);
+                if (compilationInfo.messages) {
+                    for (const msg of compilationInfo.messages) {
+                        console.error(`  ${msg.type} at ${msg.lineNum}:${msg.linePos}: ${msg.message}`);
+                    }
+                }
+            } catch (infoError) {
+                console.error('Could not get compilation info:', infoError);
+            }
+        }
+        throw e;
+    }
+
+    // Separate layouts: compute doesn't need read-only bindings, render does
+    const computeBindGroupLayout = device.createBindGroupLayout({
+        entries: [
+            { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+            { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+            { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+            { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+            { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+        ]
+    });
+    
+    const renderBindGroupLayout = device.createBindGroupLayout({
+        entries: [
+            { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+            { binding: 5, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } }, // Non-atomic read for density
+            { binding: 6, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } }, // Non-atomic read for colorR
+            { binding: 7, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } }, // Non-atomic read for colorG
+            { binding: 8, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } }, // Non-atomic read for colorB
+        ]
+    });
+
+    let computePipeline;
+    try {
+        computePipeline = await device.createComputePipelineAsync({
+            layout: device.createPipelineLayout({ bindGroupLayouts: [computeBindGroupLayout] }),
+            compute: { module, entryPoint: 'computeMain' },
+        });
+    } catch (e) {
+        console.error('Compute pipeline creation failed:', e);
+        throw e;
+    }
+
+    // Clear pipeline - uses compute shader to zero buffers (more reliable than clearBuffer)
+    let clearPipeline;
+    try {
+        clearPipeline = await device.createComputePipelineAsync({
+            layout: device.createPipelineLayout({ bindGroupLayouts: [computeBindGroupLayout] }),
+            compute: { module, entryPoint: 'clearMain' },
+        });
+    } catch (e) {
+        console.error('Clear pipeline creation failed:', e);
+        console.error('Shader code length:', shaderCode.length);
+        console.error('Looking for clearMain in shader...');
+        if (shaderCode.includes('clearMain')) {
+            console.error('clearMain found in shader code');
+        } else {
+            console.error('clearMain NOT found in shader code!');
+        }
+        throw e;
+    }
+
+
+    // Declare supersampling variables first
+    let highResTexture = null;
+    let highResTextureView = null;
+    let downsamplePipeline = null;
+    let downsampleBindGroup = null;
+    let downsampleParamsBufferRef = null;
+    let highResWidth = 0;
+    let highResHeight = 0;
+
+    // Function to create/recreate high-res texture and downsample pipeline
+    async function createSupersamplingResources() {
+        if (!webgpuAvailable || !device) return;
+        
+        if (highResTexture) {
+            highResTexture.destroy();
+        }
+        if (downsampleParamsBufferRef) {
+            downsampleParamsBufferRef.destroy();
+        }
+        
+        // Reset all resources first
+        highResTexture = null;
+        highResTextureView = null;
+        downsamplePipeline = null;
+        downsampleBindGroup = null;
+        downsampleParamsBufferRef = null;
+        
+        if (state && state.supersampling > 1) {
+            try {
+                const renderDims = getRenderDimensions(state.supersampling);
+                highResWidth = renderDims.width;
+                highResHeight = renderDims.height;
+                
+                highResTexture = device.createTexture({
+                    size: [highResWidth, highResHeight],
+                    format: presentationFormat,
+                    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+                });
+                highResTextureView = highResTexture.createView();
+                
+                // Create sampler for downsampling (nearest for precise box filtering)
+                const sampler = device.createSampler({
+                    magFilter: 'nearest',
+                    minFilter: 'nearest',
+                });
+                
+                // Create uniform buffer for downsample params
+                const downsampleParamsBuffer = device.createBuffer({
+                    size: 3 * 4, // 3 floats: supersampling, highResWidth, highResHeight
+                    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+                });
+                
+                // Update params buffer
+                const paramsData = new Float32Array([
+                    state.supersampling,
+                    highResWidth,
+                    highResHeight
+                ]);
+                device.queue.writeBuffer(downsampleParamsBuffer, 0, paramsData);
+                
+                // Create bind group layout for downsample
+                const downsampleBindGroupLayout = device.createBindGroupLayout({
+                    entries: [
+                        { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+                        { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: {} },
+                        { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+                    ]
+                });
+                
+                // Create downsample pipeline
+                const downsampleShaderCode = await loadShader('shaders/downsample.wgsl');
+                const downsampleModule = device.createShaderModule({ code: downsampleShaderCode });
+                downsamplePipeline = device.createRenderPipeline({
+                    layout: device.createPipelineLayout({ bindGroupLayouts: [downsampleBindGroupLayout] }),
+                    vertex: { module: downsampleModule, entryPoint: 'downsampleVertex' },
+                    fragment: {
+                        module: downsampleModule,
+                        entryPoint: 'downsampleFragment',
+                        targets: [{ format: presentationFormat }],
+                    },
+                    primitive: { topology: 'triangle-list' },
+                });
+                
+                // Create bind group for downsample
+                downsampleBindGroup = device.createBindGroup({
+                    layout: downsampleBindGroupLayout,
+                    entries: [
+                        { binding: 0, resource: { buffer: downsampleParamsBuffer } },
+                        { binding: 1, resource: highResTextureView },
+                        { binding: 2, resource: sampler },
+                    ],
+                });
+                
+                // Store params buffer for updates
+                downsampleParamsBufferRef = downsampleParamsBuffer;
+            } catch (error) {
+                console.error('Failed to create supersampling resources:', error);
+                // Clean up on error
+                if (highResTexture) {
+                    highResTexture.destroy();
+                    highResTexture = null;
+                }
+                highResTextureView = null;
+                downsamplePipeline = null;
+                downsampleBindGroup = null;
+                if (downsampleParamsBufferRef) {
+                    downsampleParamsBufferRef.destroy();
+                    downsampleParamsBufferRef = null;
+                }
+            }
+        }
+    }
+    
+    // Initialize supersampling resources (will be called again after state is defined)
+    // This first call won't create resources since state isn't defined yet, but it's safe
+
+    const renderPipeline = device.createRenderPipeline({
+        layout: device.createPipelineLayout({ bindGroupLayouts: [renderBindGroupLayout] }),
+        vertex: { module, entryPoint: 'vertexMain' },
+        fragment: { module, entryPoint: 'fragmentMain', targets: [{ format: presentationFormat }] },
+        primitive: { topology: 'triangle-list' },
+    });
+
+    // Function to create compute bind group (for compute passes)
+    function createComputeBindGroup(paramsBufferToUse = paramsBufferActive) {
+        return device.createBindGroup({
+            layout: computeBindGroupLayout,
+            entries: [
+                { binding: 0, resource: { buffer: paramsBufferToUse } },
+                { binding: 1, resource: { buffer: densityBuffer } },
+                { binding: 2, resource: { buffer: colorBufferR } },
+                { binding: 3, resource: { buffer: colorBufferG } },
+                { binding: 4, resource: { buffer: colorBufferB } },
+            ]
+        });
+    }
+    
+    // Function to create render bind group (for render passes)
+    function createRenderBindGroup(paramsBufferToUse = paramsBufferActive) {
+        return device.createBindGroup({
+            layout: renderBindGroupLayout,
+            entries: [
+                { binding: 0, resource: { buffer: paramsBufferToUse } },
+                { binding: 5, resource: { buffer: densityBuffer } }, // Non-atomic read for fragment shader
+                { binding: 6, resource: { buffer: colorBufferR } }, // Non-atomic read for fragment shader
+                { binding: 7, resource: { buffer: colorBufferG } }, // Non-atomic read for fragment shader
+                { binding: 8, resource: { buffer: colorBufferB } }, // Non-atomic read for fragment shader
+            ]
+        });
+    }
+    
+    // Create both compute and render bind groups upfront (double-buffering: swap references, don't recreate)
+    let computeBindGroupA = device.createBindGroup({
+        layout: computeBindGroupLayout,
+        entries: [
+            { binding: 0, resource: { buffer: paramsBufferA } },
+            { binding: 1, resource: { buffer: densityBuffer } },
+            { binding: 2, resource: { buffer: colorBufferR } },
+            { binding: 3, resource: { buffer: colorBufferG } },
+            { binding: 4, resource: { buffer: colorBufferB } },
+        ]
+    });
+    let computeBindGroupB = device.createBindGroup({
+        layout: computeBindGroupLayout,
+        entries: [
+            { binding: 0, resource: { buffer: paramsBufferB } },
+            { binding: 1, resource: { buffer: densityBuffer } },
+            { binding: 2, resource: { buffer: colorBufferR } },
+            { binding: 3, resource: { buffer: colorBufferG } },
+            { binding: 4, resource: { buffer: colorBufferB } },
+        ]
+    });
+    let computeBindGroupActive = computeBindGroupA;
+    let computeBindGroupInactive = computeBindGroupB;
+    
+    let renderBindGroupA = device.createBindGroup({
+        layout: renderBindGroupLayout,
+        entries: [
+            { binding: 0, resource: { buffer: paramsBufferA } },
+            { binding: 5, resource: { buffer: densityBuffer } }, // Non-atomic read for fragment shader
+            { binding: 6, resource: { buffer: colorBufferR } }, // Non-atomic read for fragment shader
+            { binding: 7, resource: { buffer: colorBufferG } }, // Non-atomic read for fragment shader
+            { binding: 8, resource: { buffer: colorBufferB } }, // Non-atomic read for fragment shader
+        ]
+    });
+    let renderBindGroupB = device.createBindGroup({
+        layout: renderBindGroupLayout,
+        entries: [
+            { binding: 0, resource: { buffer: paramsBufferB } },
+            { binding: 5, resource: { buffer: densityBuffer } }, // Non-atomic read for fragment shader
+            { binding: 6, resource: { buffer: colorBufferR } }, // Non-atomic read for fragment shader
+            { binding: 7, resource: { buffer: colorBufferG } }, // Non-atomic read for fragment shader
+            { binding: 8, resource: { buffer: colorBufferB } }, // Non-atomic read for fragment shader
+        ]
+    });
+    let renderBindGroupActive = renderBindGroupA;
+    let renderBindGroupInactive = renderBindGroupB;
+
+    // --- Performance Measurement (Timestamp Queries) ---
+    let enableTimestamps = false; // Will be set to true if supported
+    let timestampQuerySet = null;
+    let timestampBuffer = null;
+    let timestampReadbackBuffer = null;
+    let lastComputeTimeNs = null; // Store compute time from previous frame for adaptive scaling
+    
+    // Check if timestamp queries are supported
+    if (device.features.has('timestamp-query')) {
+        try {
+            timestampQuerySet = device.createQuerySet({
+                type: 'timestamp',
+                count: 4, // Before compute, after compute, after render, end
+            });
+            timestampBuffer = device.createBuffer({
+                size: 4 * 8, // 4 timestamps × 8 bytes each
+                usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+            });
+            timestampReadbackBuffer = device.createBuffer({
+                size: 4 * 8,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
+            enableTimestamps = true;
+            console.log('Timestamp queries enabled for performance measurement');
+        } catch (e) {
+            console.warn('Could not create timestamp queries:', e);
+        }
+    } else {
+        console.log('Timestamp queries not supported on this device');
+    }
+    
+
+    // --- State & UI ---
+
+    const state = {
+        a: -2.24,
+        b: 0.43,
+        c: -0.65,
+        d: -2.43,
+        exposure: 30.0, // Default exposure value (slider will be positioned accordingly)
+        gamma: 0.237,
+        contrast: 1.5,    // Contrast (1.0 = neutral, >1.0 = more contrast, <1.0 = less contrast) - default 1.5
+        seed: Math.random() * 100.0, // RNG seed - changed via Ctrl+S (hidden dev option)
+        colorMethod: 1, // 0 = default, 1 = Classic, 2 = Exotic, 3 = Vibrant, 4 = Surprise, 5 = Iteration Hues
+        totalIterations: 0,
+        supersampling: 1,
+        viewOffsetX: 0.0, // Pan offset X
+        viewOffsetY: 0.0, // Pan offset Y
+        viewScale: 1.0,   // Zoom scale (1.0 = default)
+        fractalMinX: -2.0, // Fractal space bounds (for rebase, changes on rebase)
+        fractalMaxX: 2.0,
+        fractalMinY: -2.0,
+        fractalMaxY: 2.0,
+        originalFractalMinX: -2.0, // Original fractal bounds (never change, used for random starting positions)
+        originalFractalMaxX: 2.0,
+        originalFractalMinY: -2.0,
+        originalFractalMaxY: 2.0,
+        exposureMultiplier: 1.0, // Internal multiplier, compounds on rebase
+        rngMode: 1, // 0 = hash12 (PCG), 1 = Sobol scrambled (QMC), 2 = R2 (optimal QMC), 3 = Sobol pure (QMC) - default to Sobol scrambled
+    };
+    
+    // Now that state is defined, initialize supersampling resources properly
+    await createSupersamplingResources();
+
+    let needsClear = true;
+    let isRunning = true; // Start in running mode
+    let animationFrameId = null;
+    let useCpuRng = false; // Internal flag: automatically set to true when WebGPU unavailable (fallback mode)
+    
+    // Attract mode state
+    let attractModeActive = false;
+    let attractModeAnimationId = null;
+    let attractModeStartTime = 0;
+    let attractModeFirstStart = true; // Track if this is the first attract mode start since app load
+    // Attract mode parameters: each variable has its own phase offset and frequency
+    const attractModeParams = {
+        a: { phase: 0, frequency: 0.0003, center: 0, amplitude: 4.0 },
+        b: { phase: Math.PI / 2, frequency: 0.00025, center: 0, amplitude: 4.0 },
+        c: { phase: Math.PI, frequency: 0.00035, center: 0, amplitude: 4.0 },
+        d: { phase: Math.PI * 1.5, frequency: 0.00028, center: 0, amplitude: 4.0 }
+    };
+    
+    // =============================================================================
+    // JAVASCRIPT RNG IMPLEMENTATIONS (CPU fallback/verification)
+    // =============================================================================
+    
+    // Hash function for scrambling (matches WGSL hash32)
+    function hash32(n) {
+        let x = n >>> 0; // Ensure unsigned 32-bit
+        x ^= x >>> 16;
+        x = Math.imul(x, 0x85ebca6b) >>> 0;
+        x ^= x >>> 13;
+        x = Math.imul(x, 0xc2b2ae35) >>> 0;
+        x ^= x >>> 16;
+        return x >>> 0;
+    }
+    
+    // Hash12 function (matches WGSL hash12)
+    function hash12(p) {
+        const p3 = [
+            (p[0] % 1 + 1) % 1 * 0.1031,
+            (p[1] % 1 + 1) % 1 * 0.1031,
+            (p[0] % 1 + 1) % 1 * 0.1031
+        ];
+        const dot1 = p3[0] * (p3[1] + 33.33) + p3[1] * (p3[2] + 33.33) + p3[2] * (p3[0] + 33.33);
+        const p3New = [p3[0] + dot1, p3[1] + dot1, p3[2] + dot1];
+        const dot2 = p3New[0] * (p3New[1] + 33.33) + p3New[1] * (p3New[2] + 33.33) + p3New[2] * (p3New[0] + 33.33);
+        return ((p3New[0] + p3New[1]) * p3New[2] + dot2) % 1;
+    }
+    
+    // Reverse bits of a 32-bit integer
+    function reverseBits(x) {
+        x = x >>> 0;
+        x = ((x & 0x55555555) << 1) | ((x & 0xAAAAAAAA) >>> 1);
+        x = ((x & 0x33333333) << 2) | ((x & 0xCCCCCCCC) >>> 2);
+        x = ((x & 0x0F0F0F0F) << 4) | ((x & 0xF0F0F0F0) >>> 4);
+        x = ((x & 0x00FF00FF) << 8) | ((x & 0xFF00FF00) >>> 8);
+        x = ((x & 0x0000FFFF) << 16) | ((x & 0xFFFF0000) >>> 16);
+        return x >>> 0;
+    }
+    
+    // Laine-Karras permutation (matches WGSL exactly: v ^= v * constant)
+    function lkPermute(x, seed) {
+        let v = (x + seed) >>> 0;
+        v ^= Math.imul(v, 0x6c50b47c) >>> 0;
+        v ^= Math.imul(v, 0xb82f1e52) >>> 0;
+        v ^= Math.imul(v, 0xc7afe638) >>> 0;
+        v ^= Math.imul(v, 0x8d22f6e6) >>> 0;
+        return v >>> 0;
+    }
+    
+    // Owen scramble
+    function owenScramble(x, seed) {
+        return reverseBits(lkPermute(reverseBits(x), seed));
+    }
+    
+    // Convert u32 to [0,1) using top 24 bits
+    function toUnit(u) {
+        return (u >>> 8) / 16777216.0;
+    }
+    
+    // Sobol(0,2) base sequence
+    function sobol02Bits(index) {
+        const x = reverseBits(index);
+        const y = (x ^ (x >>> 1)) >>> 0;
+        return [x, y];
+    }
+    
+    // Pure Sobol(0,2) generator
+    function sobol2dPure(index, seed) {
+        const offset = ((seed & 0xFFFF0000) | ((seed & 0xFFFF) * 0x9e3779b9)) >>> 0;
+        const offsetIndex = (index + offset) >>> 0;
+        const bits = sobol02Bits(offsetIndex);
+        return [toUnit(bits[0]), toUnit(bits[1])];
+    }
+    
+    // Scrambled Sobol(0,2) generator
+    function sobol2dScrambled(index, seed) {
+        const scrambledIndex = owenScramble(index, seed);
+        const bits = sobol02Bits(scrambledIndex);
+        const x = owenScramble(bits[0], seed ^ 0xa511e9b3);
+        const y = owenScramble(bits[1], seed ^ 0x63d83595);
+        return [toUnit(x), toUnit(y)];
+    }
+    
+    // R2 sequence constants
+    const R2_ALPHA = 0.7548776662466927;  // 1/φ₂
+    const R2_BETA = 0.5698402909980532;    // 1/φ₂²
+    const PHI_INV = 0.6180339887498949;    // 1/φ
+    
+    // R2 sequence
+    function r2Sequence(index) {
+        const n = index;
+        return [
+            (n * R2_ALPHA) % 1,
+            (n * R2_BETA) % 1
+        ];
+    }
+    
+    // Cranley-Patterson rotation offset
+    function cpOffset(seed) {
+        const seedBits = new Float32Array([seed])[0];
+        const seedU32 = new Uint32Array(new Float32Array([seedBits]).buffer)[0];
+        const h1 = hash32(seedU32);
+        const h2 = hash32((seedU32 + 0x9e3779b9) >>> 0);
+        return [toUnit(h1), toUnit(h2)];
+    }
+    
+    // R2 with rotation
+    function r2WithRotation(index, seed) {
+        const r2 = r2Sequence(index);
+        const offset = cpOffset(seed);
+        return [
+            (r2[0] + offset[0]) % 1,
+            (r2[1] + offset[1]) % 1
+        ];
+    }
+    
+    // Main RNG function (JavaScript version)
+    function getRandom2D_JS(index, seed, rngMode) {
+        switch (rngMode) {
+            case 3: // Sobol pure
+                const seedHash3 = hash32(new Uint32Array(new Float32Array([seed]).buffer)[0]);
+                return sobol2dPure(index, seedHash3);
+            case 2: // R2
+                return r2WithRotation(index, seed);
+            case 1: // Sobol scrambled
+                const seedHash1 = hash32(new Uint32Array(new Float32Array([seed]).buffer)[0]);
+                return sobol2dScrambled(index, seedHash1);
+            default: // hash12 (PCG)
+                const hashX = hash12([index, seed]);
+                const hashY = hash12([index + 13, seed]);
+                return [hashX, hashY];
+        }
+    }
+    
+    // Cycle state for SHIFT+Randomize (8 subtle permutations)
+    let cycleState = {
+        initialValues: null,  // {a, b, c, d} - saved when cycle starts
+        currentIndex: 0        // 0-7, cycles through 8 permutations
+    };
+    
+    // Parameter history ring buffer (last 16 randomized parameter sets)
+    const PARAM_HISTORY_SIZE = 16;
+    const paramHistory = [];
+    let paramHistoryIndex = -1;  // Current position in history (-1 = no history)
+    let paramHistoryCount = 0;   // Number of entries in history (0 to PARAM_HISTORY_SIZE)
+    
+    // Function to update permanent status display
+    function updateStatusDisplay() {
+        const statusRunningEl = document.getElementById('status-running');
+        const statusRngEl = document.getElementById('status-rng');
+        
+        // Update running/paused status
+        // OPTIMIZATION: Show simple performance metric
+        const workload = Math.round((workgroupCount || 0) / 1000);
+        statusRunningEl.textContent = isRunning ? `Running (${workload}k grp)` : 'Paused';
+        
+        // Update RNG status
+        const generatorNames = ['hash12 (PCG)', 'Sobol scrambled (QMC)', 'R2', 'Sobol pure (QMC)'];
+        const generatorName = generatorNames[state.rngMode] || generatorNames[0];
+        statusRngEl.textContent = `RNG: ${generatorName}`;
+    }
+    
+    // Function to update toggle button appearance
+    function updateToggleButton() {
+        const btn = document.getElementById('btn-toggle');
+        if (isRunning) {
+            btn.textContent = 'RUNNING';
+            btn.style.background = '#2a5';
+        } else {
+            btn.textContent = 'PAUSED';
+            btn.style.background = '#a52';
+        }
+        updateStatusDisplay(); // Update permanent status display
+    }
+
+    // Clear cycle state (called when major changes happen)
+    function clearCycleState() {
+        cycleState.initialValues = null;
+        cycleState.currentIndex = 0;
+    }
+    
+    // Generate 8 subtle permutations of a, b, c, d values
+    // Each permutation is a small variation that keeps the overall shape similar
+    function getCyclePermutation(index, baseValues) {
+        const variation = 0.08;
+        
+        // Create 8 different permutation patterns
+        // Each pattern applies small variations to different combinations of a, b, c, d
+        const patterns = [
+            // Pattern 0: Original (no change)
+            { a: 0, b: 0, c: 0, d: 0 },
+            // Pattern 1: Small increase to a, b
+            { a: 1, b: 1, c: -0.5, d: -0.5 },
+            // Pattern 2: Small increase to c, d
+            { a: -0.5, b: -0.5, c: 1, d: 1 },
+            // Pattern 3: Alternating pattern
+            { a: 1, b: -1, c: 1, d: -1 },
+            // Pattern 4: Reverse of pattern 1
+            { a: -1, b: -1, c: 0.5, d: 0.5 },
+            // Pattern 5: Reverse of pattern 2
+            { a: 0.5, b: 0.5, c: -1, d: -1 },
+            // Pattern 6: Reverse of pattern 3
+            { a: -1, b: 1, c: -1, d: 1 },
+            // Pattern 7: Mixed subtle variation
+            { a: 0.7, b: -0.7, c: -0.7, d: 0.7 }
+        ];
+        
+        const pattern = patterns[index % 8];
+        
+        return {
+            a: baseValues.a + pattern.a * variation,
+            b: baseValues.b + pattern.b * variation,
+            c: baseValues.c + pattern.c * variation,
+            d: baseValues.d + pattern.d * variation
+        };
+    }
+    
+    // Apply cycle permutation to state
+    function applyCyclePermutation() {
+        // If no initial values saved, save current state as starting point
+        // Note: Cycle permutations are independent of main parameter history
+        // They have their own 8 variations to cycle through
+        if (!cycleState.initialValues) {
+            cycleState.initialValues = {
+                a: state.a,
+                b: state.b,
+                c: state.c,
+                d: state.d
+            };
+            // Start at index 1 instead of 0, so first variation is actually different
+            // (Pattern 0 is "no change", so we skip it on first press)
+            cycleState.currentIndex = 1;
+        }
+        
+        // Get permutation for current index
+        const perm = getCyclePermutation(cycleState.currentIndex, cycleState.initialValues);
+        
+        // Apply to state
+        state.a = perm.a;
+        state.b = perm.b;
+        state.c = perm.c;
+        state.d = perm.d;
+        
+        // Update UI
+        document.getElementById('param-a').value = state.a;
+        document.getElementById('val-a').innerText = state.a.toFixed(3);
+        document.getElementById('param-b').value = state.b;
+        document.getElementById('val-b').innerText = state.b.toFixed(3);
+        document.getElementById('param-c').value = state.c;
+        document.getElementById('val-c').innerText = state.c.toFixed(3);
+        document.getElementById('param-d').value = state.d;
+        document.getElementById('val-d').innerText = state.d.toFixed(3);
+        
+        // Update previous slider values
+        previousSliderValues.set('a', state.a);
+        previousSliderValues.set('b', state.b);
+        previousSliderValues.set('c', state.c);
+        previousSliderValues.set('d', state.d);
+        
+        // Advance to next permutation (cycles 0-7)
+        cycleState.currentIndex = (cycleState.currentIndex + 1) % 8;
+        
+        // Trigger clear and update
+        needsClear = true;
+        updateParams();
+    }
+    
+    // Save current state to history before randomizing
+    function saveStateToHistory() {
+        const savedState = {
+            a: state.a,
+            b: state.b,
+            c: state.c,
+            d: state.d,
+            exposure: state.exposure,
+            gamma: state.gamma,
+            contrast: state.contrast,
+            seed: state.seed,
+            colorMethod: state.colorMethod,
+            rngMode: state.rngMode,
+            viewOffsetX: state.viewOffsetX,
+            viewOffsetY: state.viewOffsetY,
+            viewScale: state.viewScale,
+            fractalMinX: state.fractalMinX,
+            fractalMaxX: state.fractalMaxX,
+            fractalMinY: state.fractalMinY,
+            fractalMaxY: state.fractalMaxY,
+            originalFractalMinX: state.originalFractalMinX,
+            originalFractalMaxX: state.originalFractalMaxX,
+            originalFractalMinY: state.originalFractalMinY,
+            originalFractalMaxY: state.originalFractalMaxY,
+            exposureMultiplier: state.exposureMultiplier
+        };
+        
+        // Add to ring buffer
+        paramHistoryIndex = (paramHistoryIndex + 1) % PARAM_HISTORY_SIZE;
+        paramHistory[paramHistoryIndex] = savedState;
+        
+        // Track how many entries we have (until buffer is full)
+        if (paramHistoryCount < PARAM_HISTORY_SIZE) {
+            paramHistoryCount++;
+        }
+    }
+    
+    // Restore state from history (navigate backwards)
+    function restoreStateFromHistory() {
+        if (paramHistoryCount === 0) {
+            // No history available
+            const statusTempEl = document.getElementById('status-temp');
+            statusTempEl.textContent = 'No history available';
+            statusTempEl.style.color = '#f55';
+            setTimeout(() => {
+                statusTempEl.textContent = '';
+            }, 2000);
+            return false;
+        }
+        
+        // Calculate which entry to restore (go backwards from current)
+        // If we're at index 0, wrap to the last entry
+        let restoreIndex = paramHistoryIndex - 1;
+        if (restoreIndex < 0) {
+            restoreIndex = paramHistoryCount - 1;
+        }
+        
+        const savedState = paramHistory[restoreIndex];
+        if (!savedState) {
+            return false;
+        }
+        
+        // Restore all parameters
+        state.a = savedState.a;
+        state.b = savedState.b;
+        state.c = savedState.c;
+        state.d = savedState.d;
+        state.exposure = savedState.exposure;
+        state.gamma = savedState.gamma;
+        state.contrast = savedState.contrast;
+        state.seed = savedState.seed;
+        state.colorMethod = savedState.colorMethod;
+        state.rngMode = savedState.rngMode;
+        state.viewOffsetX = savedState.viewOffsetX;
+        state.viewOffsetY = savedState.viewOffsetY;
+        state.viewScale = savedState.viewScale;
+        state.fractalMinX = savedState.fractalMinX;
+        state.fractalMaxX = savedState.fractalMaxX;
+        state.fractalMinY = savedState.fractalMinY;
+        state.fractalMaxY = savedState.fractalMaxY;
+        // Original bounds never change - always use defaults if not present (for backward compatibility)
+        state.originalFractalMinX = savedState.originalFractalMinX !== undefined ? savedState.originalFractalMinX : -2.0;
+        state.originalFractalMaxX = savedState.originalFractalMaxX !== undefined ? savedState.originalFractalMaxX : 2.0;
+        state.originalFractalMinY = savedState.originalFractalMinY !== undefined ? savedState.originalFractalMinY : -2.0;
+        state.originalFractalMaxY = savedState.originalFractalMaxY !== undefined ? savedState.originalFractalMaxY : 2.0;
+        state.exposureMultiplier = savedState.exposureMultiplier;
+        
+        // Update UI sliders
+        document.getElementById('param-a').value = state.a;
+        document.getElementById('val-a').innerText = state.a.toFixed(3);
+        document.getElementById('param-b').value = state.b;
+        document.getElementById('val-b').innerText = state.b.toFixed(3);
+        document.getElementById('param-c').value = state.c;
+        document.getElementById('val-c').innerText = state.c.toFixed(3);
+        document.getElementById('param-d').value = state.d;
+        document.getElementById('val-d').innerText = state.d.toFixed(3);
+        document.getElementById('param-exposure').value = mapExposureToSlider(state.exposure);
+        document.getElementById('val-exp').innerText = state.exposure.toFixed(3);
+        document.getElementById('param-gamma').value = mapGammaToSlider(state.gamma);
+        document.getElementById('val-gamma').innerText = state.gamma.toFixed(3);
+        document.getElementById('param-contrast').value = mapContrastToSlider(state.contrast);
+        document.getElementById('val-contrast').innerText = state.contrast.toFixed(3);
+        document.getElementById('select-color-mode').value = state.colorMethod;
+        
+        // Update previous slider values
+        previousSliderValues.set('a', state.a);
+        previousSliderValues.set('b', state.b);
+        previousSliderValues.set('c', state.c);
+        previousSliderValues.set('d', state.d);
+        
+        // Update history index
+        paramHistoryIndex = restoreIndex;
+        
+        // Clear cycle state
+        clearCycleState();
+        
+        // Update status display
+        updateStatusDisplay();
+        
+        // Show confirmation
+        const statusTempEl = document.getElementById('status-temp');
+        const remaining = paramHistoryCount > 0 ? paramHistoryCount - 1 : 0;
+        statusTempEl.textContent = `Restored (${remaining} more in history)`;
+        statusTempEl.style.color = '#5a5';
+        setTimeout(() => {
+            statusTempEl.textContent = '';
+        }, 2000);
+        
+        needsClear = true;
+        updateParams();
+        return true;
+    }
+    
+    // Randomize function based on C++ code (wxGUI.cpp lines 1115-1137)
+    function randomizeParameters() {
+        // Save current state to history before randomizing
+        saveStateToHistory();
+        
+        const fBase = 4.0;
+        const fRange = 8.0;
+        
+        // C++ code: fA = -fBase + fRange*(rand() % 10239 )/10238.0f;
+        // This gives range from -4.0 to +4.0
+        state.a = -fBase + fRange * (Math.floor(Math.random() * 10239) / 10238.0);
+        state.b = -fBase + fRange * (Math.floor(Math.random() * 10241) / 10240.0);
+        state.c = -fBase + fRange * (Math.floor(Math.random() * 10242) / 10241.0);
+        state.d = -fBase + fRange * (Math.floor(Math.random() * 10148) / 10147.0);
+        
+        // Update UI
+        document.getElementById('param-a').value = state.a;
+        document.getElementById('val-a').innerText = state.a.toFixed(3);
+        document.getElementById('param-b').value = state.b;
+        document.getElementById('val-b').innerText = state.b.toFixed(3);
+        document.getElementById('param-c').value = state.c;
+        document.getElementById('val-c').innerText = state.c.toFixed(3);
+        document.getElementById('param-d').value = state.d;
+        document.getElementById('val-d').innerText = state.d.toFixed(3);
+        
+        // Update previous slider values for delta calculation
+        previousSliderValues.set('a', state.a);
+        previousSliderValues.set('b', state.b);
+        previousSliderValues.set('c', state.c);
+        previousSliderValues.set('d', state.d);
+        
+        // Clear cycle state on full randomize
+        clearCycleState();
+        
+        // Update exposure and gamma sliders using reverse mapping
+        document.getElementById('param-exposure').value = mapExposureToSlider(state.exposure);
+        document.getElementById('val-exp').innerText = state.exposure.toFixed(3);
+        document.getElementById('param-gamma').value = mapGammaToSlider(state.gamma);
+        document.getElementById('val-gamma').innerText = state.gamma.toFixed(3);
+        
+        needsClear = true;
+        updateParams();
+    }
+
+    // Reusable ArrayBuffer and DataView for updateParams() to avoid per-frame allocations
+    const paramsArrayBuffer = new ArrayBuffer(paramsBufferSize);
+    const paramsDataView = new DataView(paramsArrayBuffer);
+    
+    // Adaptive performance scheduler
+    // Measures GPU performance per workgroup and adjusts workgroup count to maintain target frame time
+    // Target: 23.4ms per frame (~43fps) to balance quality and performance
+    const TARGET_FRAME_TIME_MS = 23.4; // Target 23.4ms (approx 43fps, 1.67x more work per frame) to reduce pixelation
+    let avgTimePerWorkgroup = 0.02;   // Initial guess (ms per workgroup) - calibrated for 128 iterations per thread
+    let workgroupCount = 5000;         // Safe start value
+    
+    // RNG sequence offset configuration - declared here so updateParams() can access it
+    const FRAME_OFFSET_INTERVAL = 30; // Advance RNG sequence offset every N frames
+    let frameCounter = 0; // Frame counter for RNG sequence offset
+    let frameOffsetCounter = 0; // Counter to track when to advance offset
+    
+    function updateParams() {
+        // Reuse existing buffer instead of allocating new one every frame
+        const renderDims = getRenderDimensions(state.supersampling);
+        
+        let offset = 0;
+        paramsDataView.setFloat32(offset, state.a, true); offset += 4;
+        paramsDataView.setFloat32(offset, state.b, true); offset += 4;
+        paramsDataView.setFloat32(offset, state.c, true); offset += 4;
+        paramsDataView.setFloat32(offset, state.d, true); offset += 4;
+        paramsDataView.setFloat32(offset, renderDims.width, true); offset += 4;
+        paramsDataView.setFloat32(offset, renderDims.height, true); offset += 4;
+        paramsDataView.setFloat32(offset, state.exposure * state.exposureMultiplier, true); offset += 4;
+        paramsDataView.setFloat32(offset, state.gamma, true); offset += 4;
+        paramsDataView.setFloat32(offset, state.contrast, true); offset += 4;
+        paramsDataView.setFloat32(offset, state.seed, true); offset += 4;
+        paramsDataView.setUint32(offset, state.colorMethod, true); offset += 4;
+        // Store log2(totalIterations) for fragment shader normalization
+        const log2TotalIterations = state.totalIterations > 1 ? Math.log2(state.totalIterations) : 0.0;
+        paramsDataView.setFloat32(offset, log2TotalIterations, true); offset += 4;
+        paramsDataView.setFloat32(offset, state.viewOffsetX, true); offset += 4;
+        paramsDataView.setFloat32(offset, state.viewOffsetY, true); offset += 4;
+        paramsDataView.setFloat32(offset, state.viewScale, true); offset += 4;
+        paramsDataView.setFloat32(offset, state.fractalMinX, true); offset += 4;
+        paramsDataView.setFloat32(offset, state.fractalMaxX, true); offset += 4;
+        paramsDataView.setFloat32(offset, state.fractalMinY, true); offset += 4;
+        paramsDataView.setFloat32(offset, state.fractalMaxY, true); offset += 4;
+        paramsDataView.setFloat32(offset, state.originalFractalMinX, true); offset += 4;
+        paramsDataView.setFloat32(offset, state.originalFractalMaxX, true); offset += 4;
+        paramsDataView.setFloat32(offset, state.originalFractalMinY, true); offset += 4;
+        paramsDataView.setFloat32(offset, state.originalFractalMaxY, true); offset += 4;
+        paramsDataView.setUint32(offset, state.rngMode, true); offset += 4;
+        // Calculate 2D dispatch dimensions for >65535 workgroups
+        const dispatchDimX = Math.min(workgroupCount || 2000, 65535);
+        paramsDataView.setUint32(offset, dispatchDimX, true); offset += 4;
+        paramsDataView.setUint32(offset, workgroupCount || 2000, true); offset += 4;
+        // Frame offset ensures each frame uses different RNG sequence positions
+        const frameOffset = (workgroupCount || 2000) * 64 * (frameCounter || 0);
+        paramsDataView.setUint32(offset, frameOffset, true); offset += 4;
+        
+        // Write to inactive buffer for next frame
+        if (webgpuAvailable && device && paramsBufferInactive) {
+            device.queue.writeBuffer(paramsBufferInactive, 0, paramsArrayBuffer);
+        }
+    }
+
+    function clearDensity() {
+        state.seed = Math.random() * 100.0;
+        state.totalIterations = 0;
+        frameCounter = 0;
+        frameOffsetCounter = 0;
+        updateIterCount();
+        
+        if (!webgpuAvailable) {
+            // Clear CPU buffers
+            if (cpuDensityBuffer) cpuDensityBuffer.fill(0);
+            if (cpuColorBufferR) cpuColorBufferR.fill(0);
+            if (cpuColorBufferG) cpuColorBufferG.fill(0);
+            if (cpuColorBufferB) cpuColorBufferB.fill(0);
+            return;
+        }
+        
+        // Clear buffers using compute shader (GPU-side clear, no allocation overhead)
+        const renderDims = getRenderDimensions(state.supersampling);
+        const bufferSize = renderDims.width * renderDims.height;
+        const workgroupCount = Math.ceil(bufferSize / 256);
+        
+        // Create command encoder for clear pass
+        const clearEncoder = device.createCommandEncoder();
+        const clearPass = clearEncoder.beginComputePass();
+        clearPass.setPipeline(clearPipeline);
+        clearPass.setBindGroup(0, computeBindGroupActive);
+        clearPass.dispatchWorkgroups(workgroupCount);
+        clearPass.end();
+        device.queue.submit([clearEncoder.finish()]);
+    }
+    
+    // Function to handle supersampling change
+    async function updateSupersampling() {
+        // Recreate buffers with new size
+        buffers = createBuffers(state.supersampling);
+        densityBuffer = buffers.density;
+        colorBufferR = buffers.colorR;
+        colorBufferG = buffers.colorG;
+        colorBufferB = buffers.colorB;
+        
+        // Recreate both compute and render bind groups when buffers change
+        computeBindGroupA = device.createBindGroup({
+            layout: computeBindGroupLayout,
+            entries: [
+                { binding: 0, resource: { buffer: paramsBufferA } },
+                { binding: 1, resource: { buffer: densityBuffer } },
+                { binding: 2, resource: { buffer: colorBufferR } },
+                { binding: 3, resource: { buffer: colorBufferG } },
+                { binding: 4, resource: { buffer: colorBufferB } },
+            ]
+        });
+        computeBindGroupB = device.createBindGroup({
+            layout: computeBindGroupLayout,
+            entries: [
+                { binding: 0, resource: { buffer: paramsBufferB } },
+                { binding: 1, resource: { buffer: densityBuffer } },
+                { binding: 2, resource: { buffer: colorBufferR } },
+                { binding: 3, resource: { buffer: colorBufferG } },
+                { binding: 4, resource: { buffer: colorBufferB } },
+            ]
+        });
+        renderBindGroupA = device.createBindGroup({
+            layout: renderBindGroupLayout,
+            entries: [
+                { binding: 0, resource: { buffer: paramsBufferA } },
+                { binding: 5, resource: { buffer: densityBuffer } }, // Non-atomic read for fragment shader
+                { binding: 6, resource: { buffer: colorBufferR } }, // Non-atomic read for fragment shader
+                { binding: 7, resource: { buffer: colorBufferG } }, // Non-atomic read for fragment shader
+                { binding: 8, resource: { buffer: colorBufferB } }, // Non-atomic read for fragment shader
+            ]
+        });
+        renderBindGroupB = device.createBindGroup({
+            layout: renderBindGroupLayout,
+            entries: [
+                { binding: 0, resource: { buffer: paramsBufferB } },
+                { binding: 5, resource: { buffer: densityBuffer } }, // Non-atomic read for fragment shader
+                { binding: 6, resource: { buffer: colorBufferR } }, // Non-atomic read for fragment shader
+                { binding: 7, resource: { buffer: colorBufferG } }, // Non-atomic read for fragment shader
+                { binding: 8, resource: { buffer: colorBufferB } }, // Non-atomic read for fragment shader
+            ]
+        });
+        // Update active/inactive references based on current state
+        computeBindGroupActive = (paramsBufferActive === paramsBufferA) ? computeBindGroupA : computeBindGroupB;
+        computeBindGroupInactive = (paramsBufferActive === paramsBufferA) ? computeBindGroupB : computeBindGroupA;
+        renderBindGroupActive = (paramsBufferActive === paramsBufferA) ? renderBindGroupA : renderBindGroupB;
+        renderBindGroupInactive = (paramsBufferActive === paramsBufferA) ? renderBindGroupB : renderBindGroupA;
+        
+        // Recreate high-res texture if needed
+        await createSupersamplingResources();
+        
+        // Clear and update
+        needsClear = true;
+        updateParams();
+    }
+    
+    function updateIterCount() {
+        const iterText = document.getElementById('iter-count');
+        if (iterText) {
+            iterText.textContent = `${Math.floor(state.totalIterations).toLocaleString()} iterations`;
+        }
+    }
+
+    // Non-linear mapping functions for better precision at low values
+    // Power function: maps 0-100 slider to actual value with exponent > 1
+    // This gives more precision in the first 1/3 of the slider range
+    function mapSliderToExposure(sliderValue) {
+        // Map 0-100 to 0.01-40.0 using power function (x^2.5)
+        // This compresses high end, expands low end for precision
+        const normalized = sliderValue / 100.0;
+        const power = Math.pow(normalized, 2.5);
+        return 0.01 + power * (40.0 - 0.01);
+    }
+    
+    function mapExposureToSlider(actualValue) {
+        const clamped = Math.max(0.01, Math.min(40.0, actualValue));
+        const normalized = (clamped - 0.01) / (40.0 - 0.01);
+        const sliderPos = Math.pow(normalized, 1.0 / 2.5);
+        return Math.round(sliderPos * 100);
+    }
+    
+    function mapSliderToGamma(sliderValue) {
+        // Map 0-100 to 0.025-1.0 using power function (x^2.2)
+        const normalized = sliderValue / 100.0;
+        const power = Math.pow(normalized, 2.2);
+        return 0.025 + power * (1.0 - 0.025);
+    }
+    
+    function mapGammaToSlider(actualValue) {
+        const clamped = Math.max(0.025, Math.min(1.0, actualValue));
+        const normalized = (clamped - 0.025) / (1.0 - 0.025);
+        const sliderPos = Math.pow(normalized, 1.0 / 2.2);
+        return Math.round(sliderPos * 100);
+    }
+    
+    function mapSliderToContrast(sliderValue) {
+        // Map 0-100 to 0.0-2.0 (1.0 = neutral)
+        // Use power function for better precision at lower values
+        const normalized = sliderValue / 100.0;
+        const power = Math.pow(normalized, 1.5);
+        return 0.0 + power * 2.0;
+    }
+    
+    function mapContrastToSlider(actualValue) {
+        // Reverse mapping: actual value to slider position
+        // Clamp to valid range
+        const clamped = Math.max(0.0, Math.min(2.0, actualValue));
+        const normalized = clamped / 2.0;
+        const sliderPos = Math.pow(normalized, 1.0 / 1.5);
+        return Math.round(sliderPos * 100);
+    }
+
+    // Track SHIFT key state for fine-grained parameter control
+    let isShiftPressed = false;
+    
+    // Shift+Rebase: Reset view transform to 1:1 without rebasing fractal bounds
+    // Leaves accumulated pixels in place to continue refining
+    function resetViewTransform() {
+        // Early return if no transform is applied (nothing to reset)
+        if (state.viewScale === 1.0 && state.viewOffsetX === 0.0 && state.viewOffsetY === 0.0) {
+            return; // No change needed
+        }
+        
+        // Only reset view transform - do NOT change fractal bounds or clear buffers
+        state.viewOffsetX = 0;
+        state.viewOffsetY = 0;
+        state.viewScale = 1.0;
+        // Do NOT set needsClear = true - keep accumulated pixels!
+        // Do NOT change fractal bounds - keep them as-is!
+        // Do NOT update exposureMultiplier - it's tied to fractal bounds
+        updateParams();
+        
+        // Show status
+        const statusTempEl = document.getElementById('status-temp');
+        statusTempEl.textContent = 'View reset to 1:1 (pixels preserved)';
+        statusTempEl.style.color = '#5a5';
+        setTimeout(() => {
+            statusTempEl.textContent = '';
+            statusTempEl.style.color = '';
+        }, 3000);
+    }
+    
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Shift' && !e.repeat) {
+            isShiftPressed = true;
+            updateParameterSliderSteps();
+        }
+        // R (without Shift): Toggle random generator (hash12 vs Sobol)
+        if ((e.key === 'r' || e.key === 'R') && !e.shiftKey && !isShiftPressed) {
+            e.preventDefault();
+            state.rngMode = (state.rngMode + 1) % 4;  // Cycle: 0 → 1 → 2 → 3 → 0
+            needsClear = true; // Clear accumulation buffer when switching RNG
+            updateParams();
+            updateStatusDisplay(); // Update permanent RNG display
+            
+            // Display RNG change confirmation
+            const statusTempEl = document.getElementById('status-temp');
+            const generatorNames = ['hash12 (PCG)', 'Sobol scrambled (QMC)', 'R2', 'Sobol pure (QMC)'];
+            const generatorName = generatorNames[state.rngMode] || generatorNames[0];
+            statusTempEl.textContent = `Switched to ${generatorName}`;
+            statusTempEl.style.color = '#4a9eff';
+            setTimeout(() => {
+                statusTempEl.textContent = '';
+            }, 2000);
+        }
+        // Shift+R: Reset view transform to 1:1 without rebasing (preserves accumulated pixels)
+        if ((e.key === 'r' || e.key === 'R') && (e.shiftKey || isShiftPressed)) {
+            e.preventDefault();
+            resetViewTransform();
+        }
+        // Ctrl+S: Change RNG seed (hidden dev option - helps identify seed-dependent graininess)
+        // Note: Does NOT clear accumulation - allows continued pixel accumulation for more accuracy
+        if ((e.key === 's' || e.key === 'S') && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            state.seed = Math.random() * 100.0;
+            // Don't clear - keep accumulating pixels for more accuracy
+            updateParams();
+            
+            // Display seed change confirmation
+            const statusTempEl = document.getElementById('status-temp');
+            statusTempEl.textContent = `Seed changed (accumulation continues)`;
+            statusTempEl.style.color = '#888';
+            setTimeout(() => {
+                statusTempEl.textContent = '';
+            }, 1000);
+        }
+    });
+    
+    window.addEventListener('keyup', (e) => {
+        if (e.key === 'Shift') {
+            isShiftPressed = false;
+            updateParameterSliderSteps();
+            // Clear cycle state when Shift is released
+            // This allows the next Shift+Random to generate a NEW set of 8 variations
+            // instead of continuing the previous cycle
+            clearCycleState();
+        }
+    });
+    
+    // Update step attribute for parameter sliders based on SHIFT state
+    function updateParameterSliderSteps() {
+        const paramSliders = ['param-a', 'param-b', 'param-c', 'param-d'];
+        const paramKeys = ['a', 'b', 'c', 'd'];
+        const normalStep = 0.001;
+        const fineStep = normalStep / 16; // 16x finer control
+        
+        paramSliders.forEach((id, index) => {
+            const slider = document.getElementById(id);
+            if (slider) {
+                slider.step = isShiftPressed ? fineStep.toString() : normalStep.toString();
+                // Update display to show appropriate precision
+                const display = document.getElementById(`val-${paramKeys[index]}`);
+                if (display) {
+                    const value = parseFloat(slider.value);
+                    const decimals = isShiftPressed ? 6 : 3;
+                    display.innerText = value.toFixed(decimals);
+                }
+            }
+        });
+    }
+
+    // Track previous slider values for delta calculation (for parameter sliders only)
+    const previousSliderValues = new Map();
+    
+    // Throttle slider input events to 30Hz (33ms) to prevent GPU queue saturation
+    const sliderThrottleTimeouts = new Map();
+    
+    // UI Wiring
+    const setupSlider = (id, key, displayId, mapper = null, reverseMapper = null) => {
+        const el = document.getElementById(id);
+        const display = document.getElementById(displayId || `val-${key}`);
+        if (!el || !display) {
+            console.error(`Missing element: ${id} or ${displayId || `val-${key}`}`);
+            return;
+        }
+        
+        // Set initial slider value (use mapper if provided)
+        let initialValue;
+        if (mapper && reverseMapper) {
+            initialValue = reverseMapper(state[key]);
+        } else {
+            initialValue = state[key];
+        }
+        el.value = initialValue;
+        display.innerText = state[key].toFixed(3);
+        
+        // Store initial value for parameter sliders (for delta calculation)
+        if (['a','b','c','d'].includes(key)) {
+            previousSliderValues.set(key, parseFloat(initialValue));
+        }
+        
+        el.addEventListener('input', (e) => {
+            // Stop attract mode only for parameter sliders (a,b,c,d), not for exposure/gamma/contrast
+            // NOTE: Exposure/gamma/contrast sliders work during attract mode
+            if (attractModeActive && ['a','b','c','d'].includes(key)) {
+                stopAttractMode();
+            }
+            
+            markInteraction(); // Trigger full-speed rendering during slider interaction
+            
+            let newValue = parseFloat(e.target.value);
+            
+            // For parameter sliders with Shift pressed, apply 10x slower movement
+            if (['a','b','c','d'].includes(key) && isShiftPressed) {
+                const prevValue = previousSliderValues.get(key) || parseFloat(initialValue);
+                const delta = newValue - prevValue;
+                // Apply only 1/10th of the delta
+                newValue = prevValue + delta * 0.1;
+                // Update the slider element to reflect the actual value (causes slight snap-back)
+                el.value = newValue.toString();
+            }
+            
+            // Clear cycle state when user manually drags parameters
+            if (['a','b','c','d'].includes(key)) {
+                clearCycleState();
+            }
+            
+            // Update previous value for next delta calculation
+            if (['a','b','c','d'].includes(key)) {
+                previousSliderValues.set(key, newValue);
+            }
+            
+            // Map slider value to actual value if mapper provided
+            if (mapper) {
+                state[key] = mapper(newValue);
+            } else {
+                state[key] = newValue;
+            }
+            // Show more decimal places when SHIFT is held (fine mode)
+            const decimals = (isShiftPressed && ['a','b','c','d'].includes(key)) ? 6 : 3;
+            display.innerText = state[key].toFixed(decimals);
+            
+            // For parameter changes (a,b,c,d), set clear flag - frame loop will handle clear+update
+            // For other parameters (exposure/gamma/contrast), throttle to 30Hz
+            if (['a','b','c','d'].includes(key)) {
+                needsClear = true;
+                // Don't call updateParams() here - let frame loop handle it after clear
+                // This ensures clear happens before new accumulation starts
+            } else {
+                // Throttle lightweight updates (exposure/gamma/contrast) to 30Hz
+                if (sliderThrottleTimeouts.has(key)) {
+                    // Clear existing timeout and reschedule
+                    clearTimeout(sliderThrottleTimeouts.get(key));
+                }
+                
+                sliderThrottleTimeouts.set(key, setTimeout(() => {
+                    sliderThrottleTimeouts.delete(key);
+                    updateParams();
+                }, 33)); // 30 FPS max update rate
+            }
+        });
+    };
+
+    // Initialize parameter slider steps
+    updateParameterSliderSteps();
+
+    setupSlider('param-a', 'a');
+    setupSlider('param-b', 'b');
+    setupSlider('param-c', 'c');
+    setupSlider('param-d', 'd');
+    setupSlider('param-exposure', 'exposure', 'val-exp', mapSliderToExposure, mapExposureToSlider);
+    setupSlider('param-gamma', 'gamma', null, mapSliderToGamma, mapGammaToSlider);
+    setupSlider('param-contrast', 'contrast', 'val-contrast', mapSliderToContrast, mapContrastToSlider);
+
+    // Presets
+    const setPreset = (a, b, c, d) => {
+        state.a = a; state.b = b; state.c = c; state.d = d;
+        document.getElementById('param-a').value = a; document.getElementById('val-a').innerText = a.toFixed(3);
+        document.getElementById('param-b').value = b; document.getElementById('val-b').innerText = b.toFixed(3);
+        document.getElementById('param-c').value = c; document.getElementById('val-c').innerText = c.toFixed(3);
+        document.getElementById('param-d').value = d; document.getElementById('val-d').innerText = d.toFixed(3);
+        
+        // Clear cycle state when preset is applied (major change)
+        clearCycleState();
+        
+        // Update previous slider values for delta calculation
+        previousSliderValues.set('a', a);
+        previousSliderValues.set('b', b);
+        previousSliderValues.set('c', c);
+        previousSliderValues.set('d', d);
+        
+        // Update exposure and gamma sliders using reverse mapping
+        document.getElementById('param-exposure').value = mapExposureToSlider(state.exposure);
+        document.getElementById('val-exp').innerText = state.exposure.toFixed(3);
+        document.getElementById('param-gamma').value = mapGammaToSlider(state.gamma);
+        document.getElementById('val-gamma').innerText = state.gamma.toFixed(3);
+        
+        needsClear = true;
+        updateParams();
+    };
+
+    // Presets dropdown
+    const presets = {
+        0: null, // None
+        1: { name: 'Classic', a: 1.4, b: -2.3, c: 2.4, d: -2.1 },
+        2: { name: 'Swirl', a: -0.827, b: -1.637, c: 1.659, d: -0.943 },
+        3: { name: 'Dream', a: 0.970, b: -1.899, c: 1.381, d: -1.506 },
+        4: { name: 'Chaos', a: -2.7, b: -0.09, c: -0.86, d: -2.2 },
+        5: { name: 'Spiral', a: 1.2, b: -1.8, c: 1.9, d: -1.5 },
+        6: { name: 'Vortex', a: -1.5, b: 1.8, c: -1.2, d: 1.9 }
+    };
+    
+    document.getElementById('select-preset').addEventListener('change', (e) => {
+        markInteraction(); // Trigger full-speed rendering during UI interaction
+        const presetId = parseInt(e.target.value);
+        if (presetId > 0 && presets[presetId]) {
+            const preset = presets[presetId];
+            setPreset(preset.a, preset.b, preset.c, preset.d);
+        }
+    });
+    
+    // Rebase: Take current view and make it the new full viewport
+    // Eliminates the "jump" by solving for bounds that preserve exact pixel-to-fractal mapping
+    document.getElementById('btn-rebase').onclick = (e) => {
+        // NOTE: Rebase works during attract mode - does NOT stop it
+        markInteraction(); // Trigger full-speed rendering during rapid button clicks
+        // Check for shift key - if pressed, do shift+rebase (reset view only)
+        if (e.shiftKey || isShiftPressed) {
+            resetViewTransform();
+            return;
+        }
+        
+        // Early return if no transform is applied (nothing to rebase)
+        if (state.viewScale === 1.0 && state.viewOffsetX === 0.0 && state.viewOffsetY === 0.0) {
+            return; // No change needed
+        }
+        
+        const baseScale = Math.min(canvasWidth, canvasHeight) * 0.2;
+        const currentMaxRange = Math.max(state.fractalMaxX - state.fractalMinX, state.fractalMaxY - state.fractalMinY);
+        const scale = baseScale * (4.0 / currentMaxRange) * 0.95; // Scale used in compute shader
+        
+        const fractalCenterX = (state.fractalMinX + state.fractalMaxX) * 0.5;
+        const fractalCenterY = (state.fractalMinY + state.fractalMaxY) * 0.5;
+
+        // Calculate exact fractal coordinates at screen corners to determine visible region
+        // Fragment shader: bufferX = (screenX - width/2) / viewScale - viewOffsetX * baseScale + width/2
+        // Compute shader: bufferX = fx * scale + (width/2 - fractalCenterX * scale)
+        // So: fx = (bufferX - width/2 + fractalCenterX * scale) / scale
+        
+        // Helper function to convert screen coordinate to fractal coordinate
+        const screenToFractal = (screenX, screenY) => {
+            const bufferX = (screenX - canvasWidth * 0.5) / state.viewScale - state.viewOffsetX * baseScale + canvasWidth * 0.5;
+            const bufferY = (screenY - canvasHeight * 0.5) / state.viewScale - state.viewOffsetY * baseScale + canvasHeight * 0.5;
+            const fx = (bufferX - canvasWidth * 0.5 + fractalCenterX * scale) / scale;
+            const fy = (bufferY - canvasHeight * 0.5 + fractalCenterY * scale) / scale;
+            return { fx, fy };
+        };
+        
+        // Get fractal coordinates at screen corners
+        const topLeft = screenToFractal(0, 0);
+        const topRight = screenToFractal(canvasWidth, 0);
+        const bottomLeft = screenToFractal(0, canvasHeight);
+        const bottomRight = screenToFractal(canvasWidth, canvasHeight);
+        
+        // Calculate exact visible fractal bounds from corners
+        const visibleMinX = Math.min(topLeft.fx, topRight.fx, bottomLeft.fx, bottomRight.fx);
+        const visibleMaxX = Math.max(topLeft.fx, topRight.fx, bottomLeft.fx, bottomRight.fx);
+        const visibleMinY = Math.min(topLeft.fy, topRight.fy, bottomLeft.fy, bottomRight.fy);
+        const visibleMaxY = Math.max(topLeft.fy, topRight.fy, bottomLeft.fy, bottomRight.fy);
+        
+        // Calculate visible center
+        const visibleCenterX = (visibleMinX + visibleMaxX) * 0.5;
+        const visibleCenterY = (visibleMinY + visibleMaxY) * 0.5;
+        
+        // Calculate visible ranges
+        const visibleRangeX = visibleMaxX - visibleMinX;
+        const visibleRangeY = visibleMaxY - visibleMinY;
+        
+        // Key insight: After rebase, the compute shader will use:
+        //   newScale = baseScale * (4.0 / newMaxRange) * 0.95
+        // We want this to equal the effective scale that was being used:
+        //   effectiveScale = scale * viewScale
+        // So: baseScale * (4.0 / newMaxRange) * 0.95 = scale * viewScale
+        // Solving: newMaxRange = (baseScale * 4.0 * 0.95) / (scale * viewScale)
+        const effectiveScale = scale * state.viewScale;
+        const newMaxRange = (baseScale * 4.0 * 0.95) / effectiveScale;
+        const newHalfRange = newMaxRange * 0.5;
+        
+        // Set new bounds centered on visible region, with range that preserves exact scale
+        state.fractalMinX = visibleCenterX - newHalfRange;
+        state.fractalMaxX = visibleCenterX + newHalfRange;
+        state.fractalMinY = visibleCenterY - newHalfRange;
+        state.fractalMaxY = visibleCenterY + newHalfRange;
+
+        state.exposureMultiplier *= (state.viewScale * state.viewScale);
+        state.viewOffsetX = 0; 
+        state.viewOffsetY = 0; 
+        state.viewScale = 1.0;
+        needsClear = true;
+        updateParams();
+        
+        // Show exposureMultiplier in status after rebase
+        const statusTempEl = document.getElementById('status-temp');
+        statusTempEl.textContent = `Rebased (exp ×${state.exposureMultiplier.toFixed(2)})`;
+        statusTempEl.style.color = '#5a5';
+        setTimeout(() => {
+            statusTempEl.textContent = '';
+            statusTempEl.style.color = '';
+        }, 3000);
+    };
+    
+    // =============================================================================
+    // ATTRACT MODE - Sinusoidal parameter variation
+    // =============================================================================
+    
+    function startAttractMode() {
+        if (attractModeActive) return;
+        
+        // On fresh app start/load, randomize parameters for truly random initial combo
+        if (attractModeFirstStart) {
+            randomizeParameters();
+            attractModeFirstStart = false; // Only randomize on first start
+        }
+        
+        // Initialize attract mode parameters with current values as centers
+        // Each parameter will oscillate around its current starting value
+        attractModeParams.a.center = state.a;
+        attractModeParams.b.center = state.b;
+        attractModeParams.c.center = state.c;
+        attractModeParams.d.center = state.d;
+        
+        // Use prime number ratios to ensure parameters are mathematically independent
+        // This guarantees they never repeat the same combination (incommensurate periods)
+        // Base frequency for tranquil, smooth movement (much slower range for calmer animation)
+        // Reduced from 0.00004-0.00008 to 0.00001-0.00002 for much more tranquil movement
+        const baseFrequency = 0.00001 + Math.random() * 0.00001;
+        
+        // Prime multipliers: 2, 3, 5, 7 ensure incommensurate periods
+        // These ratios guarantee the parameters will never align exactly
+        // Cap maximum frequency to ensure tranquil upper limit (max ~0.00014 even with prime 7)
+        const maxFrequency = 0.00014; // Tranquil upper cap - prevents any slider from moving too fast
+        attractModeParams.a.frequency = Math.min(baseFrequency * 2, maxFrequency);   // Prime: 2
+        attractModeParams.b.frequency = Math.min(baseFrequency * 3, maxFrequency);   // Prime: 3
+        attractModeParams.c.frequency = Math.min(baseFrequency * 5, maxFrequency);   // Prime: 5
+        attractModeParams.d.frequency = Math.min(baseFrequency * 7, maxFrequency);   // Prime: 7
+        
+        // Phase offsets: Start all phases at 0 so parameters begin at their center values
+        // This ensures smooth start from current parameter values without any jump
+        // The prime frequency ratios ensure they will diverge and never repeat
+        attractModeParams.a.phase = 0.0;   // Start at center (sin(0) = 0)
+        attractModeParams.b.phase = 0.0;   // Start at center (sin(0) = 0)
+        attractModeParams.c.phase = 0.0;   // Start at center (sin(0) = 0)
+        attractModeParams.d.phase = 0.0;   // Start at center (sin(0) = 0)
+        
+        attractModeActive = true;
+        attractModeStartTime = performance.now();
+        
+        // Update button text
+        const btn = document.getElementById('btn-attract');
+        if (btn) btn.textContent = 'Attract Mode (ON)';
+        
+        // Start animation loop
+        attractModeAnimationId = requestAnimationFrame(updateAttractMode);
+    }
+    
+    function stopAttractMode() {
+        if (!attractModeActive) return;
+        
+        attractModeActive = false;
+        if (attractModeAnimationId !== null) {
+            cancelAnimationFrame(attractModeAnimationId);
+            attractModeAnimationId = null;
+        }
+        
+        // Update button text
+        const btn = document.getElementById('btn-attract');
+        if (btn) btn.textContent = 'Attract Mode';
+    }
+    
+    function updateAttractMode(currentTime) {
+        if (!attractModeActive) return;
+        
+        const elapsed = currentTime - attractModeStartTime;
+        
+        // Update each parameter using sinusoidal movement
+        const params = ['a', 'b', 'c', 'd'];
+        let anyChanged = false;
+        
+        params.forEach(param => {
+            const config = attractModeParams[param];
+            const min = -4.0;
+            const max = 4.0;
+            
+            // Calculate sinusoidal value: center + amplitude * sin(phase + frequency * time)
+            const sinValue = Math.sin(config.phase + config.frequency * elapsed);
+            const newValue = config.center + sinValue * config.amplitude;
+            
+            // Clamp to slider range
+            const clampedValue = Math.max(min, Math.min(max, newValue));
+            
+            // Only update if value changed significantly (avoid unnecessary updates)
+            if (Math.abs(state[param] - clampedValue) > 0.001) {
+                state[param] = clampedValue;
+                
+                // Update UI
+                const slider = document.getElementById(`param-${param}`);
+                const display = document.getElementById(`val-${param}`);
+                if (slider) slider.value = clampedValue;
+                if (display) display.innerText = clampedValue.toFixed(3);
+                
+                // Update previous slider values
+                previousSliderValues.set(param, clampedValue);
+                
+                anyChanged = true;
+            }
+        });
+        
+        // If any parameter changed, trigger update
+        if (anyChanged) {
+            needsClear = true;
+            // Don't call updateParams() here - let the main frame loop handle it
+            // This ensures proper synchronization with the rendering pipeline
+        }
+        
+        // Continue animation
+        attractModeAnimationId = requestAnimationFrame(updateAttractMode);
+    }
+    
+    // Wire up attract mode button
+    document.getElementById('btn-attract').onclick = () => {
+        if (attractModeActive) {
+            stopAttractMode();
+        } else {
+            startAttractMode();
+        }
+    };
+    
+    // Stop attract mode when any button is pressed (except the attract button itself)
+    // NOTE: Mouse wheel and drag do NOT stop attract mode - they work together
+    const stopAttractOnButtonClick = (e) => {
+        if (e.target.id !== 'btn-attract' && attractModeActive) {
+            stopAttractMode();
+        }
+    };
+    
+    // 'a' key toggles attract mode
+    document.addEventListener('keydown', (e) => {
+        // Only trigger if not typing in an input field
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+            return;
+        }
+        if (e.key === 'a' || e.key === 'A') {
+            e.preventDefault();
+            if (attractModeActive) {
+                stopAttractMode();
+            } else {
+                startAttractMode();
+            }
+        }
+    });
+    
+    // Reset: Reset view transform and fractal bounds to default
+    document.getElementById('btn-reset').onclick = () => {
+        if (attractModeActive) stopAttractMode(); // Stop attract mode on button press
+        markInteraction(); // Trigger full-speed rendering during rapid button clicks
+        state.viewOffsetX = 0.0;
+        state.viewOffsetY = 0.0;
+        state.viewScale = 1.0;
+        state.fractalMinX = -2.0;
+        state.fractalMaxX = 2.0;
+        state.fractalMinY = -2.0;
+        state.fractalMaxY = 2.0;
+        state.exposureMultiplier = 1.0;
+        
+        needsClear = true;
+        updateParams();
+    };
+
+    document.getElementById('btn-randomize').onclick = (e) => {
+        if (attractModeActive) stopAttractMode(); // Stop attract mode on button press
+        markInteraction(); // Trigger full-speed rendering during rapid button clicks
+        
+        // Check if CTRL is held (for history navigation)
+        // Prioritize event's modifier keys over tracked state for button clicks
+        if (e.ctrlKey || e.metaKey) {
+            // CTRL+Randomize: Go backwards through parameter history
+            restoreStateFromHistory();
+        } else if (e.shiftKey) {
+            // SHIFT+Randomize: Cycle through 8 subtle permutations
+            // (Only check e.shiftKey for button clicks - more reliable than isShiftPressed)
+            applyCyclePermutation();
+        } else {
+            // Normal randomize: Full random values
+            randomizeParameters();
+        }
+    };
+
+    document.getElementById('btn-clear').onclick = () => {
+        if (attractModeActive) stopAttractMode(); // Stop attract mode on button press
+        markInteraction(); // Trigger full-speed rendering during rapid button clicks
+        clearDensity();
+        clearCycleState(); // Clear cycle state on clear
+        // Status will be updated by updateToggleButton if needed
+        // Display clear confirmation
+        const statusTempEl = document.getElementById('status-temp');
+        statusTempEl.textContent = 'Cleared';
+        statusTempEl.style.color = '#5a5';
+        setTimeout(() => {
+            statusTempEl.textContent = '';
+            statusTempEl.style.color = '';
+        }, 1000);
+    };
+
+
+    document.getElementById('select-color-mode').addEventListener('change', (e) => {
+        markInteraction(); // Trigger full-speed rendering during UI interaction
+        state.colorMethod = parseInt(e.target.value);
+        needsClear = true; // Clear when changing color mode
+        updateParams();
+        // Note: On Intel Arc (HP OmniStudio), Color Mode 0 (Default) provides best performance
+        // as it avoids writing to 3 extra color buffers, reducing memory bandwidth pressure.
+    });
+
+    // Defensive validation helpers for loading metadata
+    function safeNumber(value, defaultValue, min = -Infinity, max = Infinity) {
+        if (typeof value !== 'number' || !isFinite(value)) return defaultValue;
+        return Math.max(min, Math.min(max, value));
+    }
+    
+    function safeInteger(value, defaultValue, min = -Infinity, max = Infinity) {
+        const num = safeNumber(value, defaultValue, min, max);
+        return Math.round(num);
+    }
+
+    // Load Fractal from PNG - restores state from embedded metadata with defensive validation
+    document.getElementById('btn-load').onclick = () => {
+        if (attractModeActive) stopAttractMode(); // Stop attract mode on button press
+        if (!webgpuAvailable) {
+            alert('Loading from PNG requires WebGPU. Please use a browser with WebGPU support.');
+            return;
+        }
+        markInteraction(); // Trigger full-speed rendering during rapid button clicks
+        document.getElementById('file-input').click();
+    };
+
+    document.getElementById('file-input').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        try {
+            const metadata = await extractPNGMetadata(file);
+            
+            // If no metadata at all, can't proceed
+            if (!metadata) {
+                alert('This PNG file does not contain fractal metadata. It may have been saved with an older version or edited.');
+                return;
+            }
+
+            let hasValidParams = false;
+            let warnings = [];
+
+            // Restore parameters with validation (these are critical - need at least some valid values)
+            if (metadata.parameters) {
+                const origA = state.a, origB = state.b, origC = state.c, origD = state.d;
+                
+                // Validate each parameter - allow any finite number (attractor params can be any value)
+                state.a = safeNumber(metadata.parameters.a, origA);
+                state.b = safeNumber(metadata.parameters.b, origB);
+                state.c = safeNumber(metadata.parameters.c, origC);
+                state.d = safeNumber(metadata.parameters.d, origD);
+                
+                // Check if we got at least some valid parameters
+                hasValidParams = (
+                    (typeof metadata.parameters.a === 'number' && isFinite(metadata.parameters.a)) ||
+                    (typeof metadata.parameters.b === 'number' && isFinite(metadata.parameters.b)) ||
+                    (typeof metadata.parameters.c === 'number' && isFinite(metadata.parameters.c)) ||
+                    (typeof metadata.parameters.d === 'number' && isFinite(metadata.parameters.d))
+                );
+                
+                if (!hasValidParams) {
+                    warnings.push('Fractal parameters (a,b,c,d) were missing or invalid - using defaults');
+                } else if (state.a === origA && state.b === origB && state.c === origC && state.d === origD) {
+                    warnings.push('Some fractal parameters were invalid - using defaults for those');
+                }
+            } else {
+                warnings.push('Fractal parameters section missing - using defaults');
+            }
+
+            // Restore view state with validation
+            if (metadata.view) {
+                state.viewOffsetX = safeNumber(metadata.view.offsetX, 0.0, -1000, 1000);
+                state.viewOffsetY = safeNumber(metadata.view.offsetY, 0.0, -1000, 1000);
+                state.viewScale = safeNumber(metadata.view.scale, 1.0, 0.01, 100.0);
+            } else {
+                // Use defaults if view section missing
+                state.viewOffsetX = 0.0;
+                state.viewOffsetY = 0.0;
+                state.viewScale = 1.0;
+            }
+
+            // Restore fractal bounds with validation (ensure min < max)
+            if (metadata.fractalBounds) {
+                const minX = safeNumber(metadata.fractalBounds.minX, -2.0);
+                const maxX = safeNumber(metadata.fractalBounds.maxX, 2.0);
+                const minY = safeNumber(metadata.fractalBounds.minY, -2.0);
+                const maxY = safeNumber(metadata.fractalBounds.maxY, 2.0);
+                
+                // Ensure valid bounds (min < max)
+                if (minX < maxX && minY < maxY) {
+                    state.fractalMinX = minX;
+                    state.fractalMaxX = maxX;
+                    state.fractalMinY = minY;
+                    state.fractalMaxY = maxY;
+                } else {
+                    warnings.push('Fractal bounds were invalid (min >= max) - using defaults');
+                    state.fractalMinX = -2.0;
+                    state.fractalMaxX = 2.0;
+                    state.fractalMinY = -2.0;
+                    state.fractalMaxY = 2.0;
+                }
+            } else {
+                warnings.push('Fractal bounds missing - using defaults');
+                state.fractalMinX = -2.0;
+                state.fractalMaxX = 2.0;
+                state.fractalMinY = -2.0;
+                state.fractalMaxY = 2.0;
+            }
+
+            // Restore rendering settings with validation and safe defaults
+            if (metadata.rendering) {
+                // Exposure: 0.01 to 40.0
+                if (metadata.rendering.exposure !== undefined) {
+                    state.exposure = safeNumber(metadata.rendering.exposure, 25.0, 0.01, 40.0);
+                }
+                
+                // Gamma: 0.1 to 3.0
+                if (metadata.rendering.gamma !== undefined) {
+                    state.gamma = safeNumber(metadata.rendering.gamma, 0.255, 0.1, 3.0);
+                }
+                
+                // Contrast: 0.0 to 2.0
+                if (metadata.rendering.contrast !== undefined) {
+                    state.contrast = safeNumber(metadata.rendering.contrast, 1.0, 0.0, 2.0);
+                }
+                
+                // Color method: 0-5 (integer)
+                if (metadata.rendering.colorMethod !== undefined) {
+                    state.colorMethod = safeInteger(metadata.rendering.colorMethod, 0, 0, 5);
+                }
+                
+                // Supersampling: 1 to max safe
+                if (metadata.rendering.supersampling !== undefined) {
+                    const requestedSS = safeInteger(metadata.rendering.supersampling, 1, 1, getMaxSafeSupersampling());
+                    state.supersampling = Math.min(requestedSS, getMaxSafeSupersampling());
+                }
+                
+                // Exposure multiplier: must be positive
+                if (metadata.rendering.exposureMultiplier !== undefined) {
+                    state.exposureMultiplier = safeNumber(metadata.rendering.exposureMultiplier, 1.0, 0.001, 1000.0);
+                } else {
+                    state.exposureMultiplier = 1.0; // Default for old saves
+                }
+                
+                // RNG mode: 0-3 (integer), default to Sobol scrambled (1) for old saves
+                if (metadata.rendering.rngMode !== undefined) {
+                    state.rngMode = safeInteger(metadata.rendering.rngMode, 1, 0, 3);
+                } else {
+                    state.rngMode = 1; // Default to Sobol for old PNGs without rngMode
+                }
+            } else {
+                warnings.push('Rendering settings missing - using defaults');
+                // Ensure rngMode is set even if rendering section is missing
+                state.rngMode = 1; // Default to Sobol
+            }
+
+            // Update UI sliders
+            document.getElementById('param-a').value = state.a;
+            document.getElementById('param-b').value = state.b;
+            document.getElementById('param-c').value = state.c;
+            document.getElementById('param-d').value = state.d;
+            document.getElementById('param-exposure').value = mapExposureToSlider(state.exposure);
+            document.getElementById('param-gamma').value = mapGammaToSlider(state.gamma);
+            document.getElementById('param-contrast').value = mapContrastToSlider(state.contrast);
+            // Supersampling UI removed - commented out for future use
+            // document.getElementById('param-ss').value = state.supersampling;
+            document.getElementById('select-color-mode').value = state.colorMethod;
+            
+            // Update previous slider values for delta calculation
+            previousSliderValues.set('a', state.a);
+            previousSliderValues.set('b', state.b);
+            previousSliderValues.set('c', state.c);
+            previousSliderValues.set('d', state.d);
+
+            // Update displays
+            setupSlider('param-a', 'a');
+            setupSlider('param-b', 'b');
+            setupSlider('param-c', 'c');
+            setupSlider('param-d', 'd');
+            setupSlider('param-exposure', 'exposure', 'val-exp', mapSliderToExposure, mapExposureToSlider);
+            setupSlider('param-gamma', 'gamma', 'val-gamma', mapSliderToGamma, mapGammaToSlider);
+            setupSlider('param-contrast', 'contrast', 'val-contrast', mapSliderToContrast, mapContrastToSlider);
+            // document.getElementById('val-ss').textContent = `${state.supersampling}x`;
+
+            // Validate all parameters before updating GPU state
+            // Check for NaN or Infinity that could cause GPU hangs
+            const paramsToCheck = ['a', 'b', 'c', 'd', 'exposure', 'gamma', 'contrast', 'viewOffsetX', 'viewOffsetY', 'viewScale'];
+            let hasInvalidParams = false;
+            for (const key of paramsToCheck) {
+                const value = state[key];
+                if (!isFinite(value) || isNaN(value)) {
+                    console.error(`Invalid parameter ${key}: ${value}`);
+                    hasInvalidParams = true;
+                }
+            }
+            
+            if (hasInvalidParams) {
+                alert('Loaded PNG contains invalid parameter values (NaN or Infinity). Using safe defaults.');
+                // Reset to safe defaults
+                state.a = -2.24;
+                state.b = 0.43;
+                state.c = -0.65;
+                state.d = -2.43;
+                state.exposure = 25.0;
+                state.gamma = 0.255;
+                state.contrast = 1.0;
+                state.viewOffsetX = 0.0;
+                state.viewOffsetY = 0.0;
+                state.viewScale = 1.0;
+            }
+
+            // Recreate buffers if supersampling changed
+            try {
+                await updateSupersampling();
+            } catch (error) {
+                console.error('Error updating supersampling during PNG load:', error);
+                alert('Error recreating GPU buffers. The GPU may have lost connection. Please refresh the page.');
+                return; // Don't proceed if buffer creation fails
+            }
+
+            // Clear and restart accumulation with restored state
+            needsClear = true;
+            updateParams();
+
+            // Clear cycle state on load (major change)
+            clearCycleState();
+            
+            // Update status display to show correct RNG mode (important for old PNGs)
+            updateStatusDisplay();
+            
+            // Show success message with warnings if any
+            const statusTempEl = document.getElementById('status-temp');
+            
+            if (warnings.length > 0) {
+                // Show warnings in console for debugging
+                console.warn('PNG load warnings:', warnings);
+                statusTempEl.textContent = `Loaded (${warnings.length} warning${warnings.length > 1 ? 's' : ''})`;
+                statusTempEl.style.color = '#fa5';
+            } else {
+                statusTempEl.textContent = 'Fractal state loaded!';
+                statusTempEl.style.color = '#2a5';
+            }
+            
+            setTimeout(() => {
+                statusTempEl.textContent = '';
+                statusTempEl.style.color = '';
+            }, 3000);
+
+        } catch (error) {
+            console.error('Error loading fractal:', error);
+            alert('Failed to load fractal metadata: ' + error.message);
+        }
+
+        // Reset file input
+        e.target.value = '';
+    });
+
+    // Supersampling input handler - commented out for future high-res rendering
+    // When re-enabling supersampling UI, uncomment this handler and the UI control above
+    /*
+    document.getElementById('param-ss').addEventListener('input', async (e) => {
+        markInteraction(); // Trigger full-speed rendering during slider interaction
+        const newSS = parseInt(e.target.value);
+        if (newSS >= 1 && newSS <= 8) {
+            const maxSS = getMaxSafeSupersampling();
+            const safeSS = Math.min(newSS, maxSS);
+            state.supersampling = safeSS;
+            document.getElementById('val-ss').textContent = `${safeSS}x`;
+            if (safeSS < newSS) {
+                document.getElementById('param-ss').value = safeSS;
+                document.getElementById('val-ss').textContent = `${safeSS}x (max)`;
+            }
+            await updateSupersampling();
+        }
+    });
+    */
+    
+    // Initialize supersampling display - commented out (UI removed)
+    // document.getElementById('val-ss').textContent = `${state.supersampling}x`;
+
+    document.getElementById('btn-toggle').onclick = () => {
+        if (attractModeActive) stopAttractMode(); // Stop attract mode on button press
+        markInteraction(); // Trigger full-speed rendering during rapid button clicks
+        if (isRunning) {
+            // Pause
+            isRunning = false;
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+        } else {
+            // Resume
+            isRunning = true;
+            startFrame();
+        }
+        updateToggleButton();
+    };
+
+    // Save Screen - saves what's currently visible with metadata
+    // Using toBlob() for better performance (async, non-blocking, more memory efficient)
+    document.getElementById('btn-save-screen').onclick = async () => {
+        if (attractModeActive) stopAttractMode(); // Stop attract mode on button press
+        if (!webgpuAvailable) {
+            // CPU mode: save current canvas
+            const canvas = document.getElementById('canvas');
+            canvas.toBlob((blob) => {
+                if (blob) {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'fractal-screen.png';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                }
+            }, 'image/png');
+            return;
+        }
+        markInteraction(); // Trigger full-speed rendering during rapid button clicks
+        // Show saving status
+        const statusTempEl = document.getElementById('status-temp');
+        statusTempEl.textContent = 'Saving...';
+        statusTempEl.style.color = '#4a9eff';
+        
+        try {
+            // Use toBlob() instead of toDataURL() for better performance
+            const blob = await new Promise((resolve, reject) => {
+                canvas.toBlob((blob) => {
+                    if (blob) resolve(blob);
+                    else reject(new Error('Failed to create PNG blob'));
+                }, 'image/png');
+            });
+            
+            // Create metadata object with current state
+            const metadata = {
+                version: '1.0',
+                timestamp: Date.now(),
+                parameters: {
+                    a: state.a,
+                    b: state.b,
+                    c: state.c,
+                    d: state.d
+                },
+                view: {
+                    offsetX: state.viewOffsetX,
+                    offsetY: state.viewOffsetY,
+                    scale: state.viewScale
+                },
+                fractalBounds: {
+                    minX: state.fractalMinX,
+                    maxX: state.fractalMaxX,
+                    minY: state.fractalMinY,
+                    maxY: state.fractalMaxY
+                },
+                rendering: {
+                    exposure: state.exposure,
+                    gamma: state.gamma,
+                    contrast: state.contrast,
+                    colorMethod: state.colorMethod,
+                    supersampling: state.supersampling,
+                    totalIterations: state.totalIterations,
+                    exposureMultiplier: state.exposureMultiplier,
+                    rngMode: state.rngMode,
+                    rngMethod: ['hash12 (PCG)', 'Sobol scrambled (QMC)', 'R2', 'Sobol pure (QMC)'][state.rngMode] || 'hash12 (PCG)'
+                },
+                canvas: {
+                    width: canvasWidth,
+                    height: canvasHeight
+                }
+            };
+            
+            try {
+                // Embed metadata into PNG
+                const blobWithMetadata = await embedPNGMetadata(blob, metadata);
+                const url = URL.createObjectURL(blobWithMetadata);
+        const link = document.createElement('a');
+                link.download = `plato_fractal_screen_${Date.now()}.png`;
+                link.href = url;
+                link.click();
+                URL.revokeObjectURL(url);
+                statusTempEl.textContent = 'Saved!';
+                statusTempEl.style.color = '#2a5';
+            } catch (error) {
+                console.error('Failed to embed metadata, saving without it:', error);
+                // Fallback: save without metadata
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.download = `plato_fractal_screen_${Date.now()}.png`;
+                link.href = url;
+                link.click();
+                URL.revokeObjectURL(url);
+                statusTempEl.textContent = 'Saved (no metadata)';
+                statusTempEl.style.color = '#fa5';
+            }
+        } catch (error) {
+            console.error('Failed to save:', error);
+            statusTempEl.textContent = 'Save failed!';
+            statusTempEl.style.color = '#f55';
+        }
+        
+        setTimeout(() => {
+            statusTempEl.textContent = '';
+            statusTempEl.style.color = '';
+        }, 2000);
+    };
+
+
+    // Initialize color mode dropdown
+    document.getElementById('select-color-mode').value = state.colorMethod.toString();
+    
+    
+    // Iteration Hues: Convert normalized iteration count (0-1) to RGB
+    // Matches shader logic exactly - smooth transitions through spectrum ending at white
+    // Iteration Hues: Convert normalized iteration count (0-1) to RGB
+    // Uses branchless cosine palette for reduced register pressure and execution divergence
+    function iterationHueToRGB(t) {
+        // Clamp t to [0, 1]
+        const clamped = Math.max(0, Math.min(1, t));
+        
+        // "Spectral" palette coefficients (a + b * cos(6.28318 * (c * t + d)))
+        // This creates a smooth rainbow: Red -> Yellow -> Green -> Cyan -> Blue -> Purple
+        const a = [0.5, 0.5, 0.5];
+        const b = [0.5, 0.5, 0.5];
+        const c = [1.0, 1.0, 1.0];
+        const d = [0.0, 0.333, 0.667]; // Phase offsets for R, G, B
+        
+        const twoPi = 6.28318;
+        return [
+            a[0] + b[0] * Math.cos(twoPi * (c[0] * clamped + d[0])),
+            a[1] + b[1] * Math.cos(twoPi * (c[1] * clamped + d[1])),
+            a[2] + b[2] * Math.cos(twoPi * (c[2] * clamped + d[2]))
+        ];
+    }
+    
+    // Initialize CPU-only mode (when WebGPU unavailable)
+    async function initCpuOnlyMode() {
+        const canvas = document.getElementById('canvas');
+        const dpr = window.devicePixelRatio || 1;
+        // Use full viewport dimensions - canvas extends all the way to left edge
+        let canvasWidth = Math.ceil(window.innerWidth * dpr);
+        let canvasHeight = Math.ceil(window.innerHeight * dpr);
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+        canvas.style.width = window.innerWidth + 'px';
+        canvas.style.height = window.innerHeight + 'px';
+        
+        // Use Canvas 2D for CPU rendering
+        cpuCanvas = canvas;
+        cpuCtx = canvas.getContext('2d');
+        
+        // Initialize CPU buffers
+        const bufferSize = canvasWidth * canvasHeight;
+        cpuDensityBuffer = new Uint32Array(bufferSize);
+        cpuColorBufferR = new Float32Array(bufferSize);
+        cpuColorBufferG = new Float32Array(bufferSize);
+        cpuColorBufferB = new Float32Array(bufferSize);
+        
+        // Force CPU RNG mode (automatic fallback when WebGPU unavailable)
+        useCpuRng = true;
+        
+        // Start CPU rendering loop
+        startCpuRenderLoop();
+    }
+    
+    // CPU-only rendering loop
+    function startCpuRenderLoop() {
+        function cpuFrame() {
+            if (!isRunning) {
+                animationFrameId = requestAnimationFrame(cpuFrame);
+                return;
+            }
+            
+            if (document.hidden) {
+                animationFrameId = requestAnimationFrame(cpuFrame);
+                return;
+            }
+            
+            // Run CPU compute
+            runCpuComputePure(1000 * 256 * 128); // CPU mode iteration count
+            
+            // Render to canvas
+            renderCpuToCanvas();
+            
+            animationFrameId = requestAnimationFrame(cpuFrame);
+        }
+        
+        animationFrameId = requestAnimationFrame(cpuFrame);
+    }
+    
+    // Pure CPU compute (no WebGPU dependencies)
+    function runCpuComputePure(iterationsPerFrame) {
+        if (!cpuDensityBuffer) return;
+        
+        const canvas = document.getElementById('canvas');
+        const w = canvas.width;
+        const h = canvas.height;
+        
+        // Calculate fractal bounds
+        const originalRangeX = state.originalFractalMaxX - state.originalFractalMinX;
+        const originalRangeY = state.originalFractalMaxY - state.originalFractalMinY;
+        const fractalRangeX = state.fractalMaxX - state.fractalMinX;
+        const fractalRangeY = state.fractalMaxY - state.fractalMinY;
+        const baseScale = Math.min(w, h) * 0.2;
+        const baseRange = 4.0;
+        const maxRange = Math.max(fractalRangeX, fractalRangeY);
+        const scale = baseScale * (baseRange / maxRange) * 0.95;
+        const fractalCenterX = (state.fractalMinX + state.fractalMaxX) * 0.5;
+        const fractalCenterY = (state.fractalMinY + state.fractalMaxY) * 0.5;
+        const centerX = w * 0.5 - fractalCenterX * scale;
+        const centerY = h * 0.5 - fractalCenterY * scale;
+        
+        // Run simulation
+        const numThreads = Math.min(iterationsPerFrame / 128, 1000); // Limit for CPU
+        for (let threadIndex = 0; threadIndex < numThreads; threadIndex++) {
+            const rnd = getRandom2D_JS(threadIndex, state.seed, state.rngMode);
+            let x = state.originalFractalMinX + rnd[0] * originalRangeX;
+            let y = state.originalFractalMinY + rnd[1] * originalRangeY;
+            
+            // Warmup
+            for (let i = 0; i < 12; i++) {
+                const nx = Math.sin(state.a * y) - Math.cos(state.b * x);
+                const ny = Math.sin(state.c * x) - Math.cos(state.d * y);
+                x = nx;
+                y = ny;
+            }
+            
+            // Accumulation
+            let prevX = x, prevY = y;
+            for (let i = 0; i < 128; i++) {
+                const nx = Math.sin(state.a * y) - Math.cos(state.b * x);
+                const ny = Math.sin(state.c * x) - Math.cos(state.d * y);
+                
+                const px = x * scale + centerX;
+                const py = y * scale + centerY;
+                const sx = Math.floor(px);
+                const sy = Math.floor(py);
+                
+                if (sx >= 0 && sx < w && sy >= 0 && sy < h) {
+                    const pixelIndex = sy * w + sx;
+                    const prevCount = cpuDensityBuffer[pixelIndex];
+                    cpuDensityBuffer[pixelIndex]++;
+                    
+                    if (state.colorMethod >= 1) {
+                        let r, g, b;
+                        
+                        // Iteration Hues mode: separate code path
+                        if (state.colorMethod === 5) {
+                            // Normalize iteration count using logarithmic scale (matching shader)
+                            const MAX_ITER_LOG = 12.0; // log2(4096)
+                            const countF = Math.max(prevCount, 1);
+                            const logCount = Math.log2(countF);
+                            const normalized = Math.max(0, Math.min(1, logCount / MAX_ITER_LOG));
+                            
+                            // Convert to RGB hue
+                            const hueRGB = iterationHueToRGB(normalized);
+                            r = hueRGB[0];
+                            g = hueRGB[1];
+                            b = hueRGB[2];
+                        } else {
+                            // Other color modes
+                            const baseR = Math.abs(prevY - ny);
+                            const baseG = Math.abs(prevX - ny);
+                            const baseB = Math.abs(prevX - nx);
+                            const scaledR = baseR * 2.5;
+                            const scaledG = baseG * 2.5;
+                            const scaledB = baseB * 2.5;
+                            
+                            r = scaledR; g = scaledG; b = scaledB;
+                            switch (state.colorMethod) {
+                                case 2: r = scaledG; g = scaledB; b = scaledR; break;
+                                case 3: r = scaledB; g = scaledR; b = scaledG; break;
+                                case 4: r = scaledB; g = scaledG; b = scaledR; break;
+                            }
+                        }
+                        
+                        const count = cpuDensityBuffer[pixelIndex];
+                        const effCount = Math.min(count, 65535);
+                        const alpha = 1.0 / (effCount + 1);
+                        cpuColorBufferR[pixelIndex] = cpuColorBufferR[pixelIndex] + (r - cpuColorBufferR[pixelIndex]) * alpha;
+                        cpuColorBufferG[pixelIndex] = cpuColorBufferG[pixelIndex] + (g - cpuColorBufferG[pixelIndex]) * alpha;
+                        cpuColorBufferB[pixelIndex] = cpuColorBufferB[pixelIndex] + (b - cpuColorBufferB[pixelIndex]) * alpha;
+                    }
+                }
+                
+                prevX = x; prevY = y;
+                x = nx; y = ny;
+            }
+        }
+    }
+    
+    // Render CPU buffers to Canvas 2D
+    function renderCpuToCanvas() {
+        if (!cpuCtx || !cpuDensityBuffer) return;
+        
+        const canvas = document.getElementById('canvas');
+        const w = canvas.width;
+        const h = canvas.height;
+        const imageData = cpuCtx.createImageData(w, h);
+        const data = imageData.data;
+        
+        const maxDensity = Math.max(...cpuDensityBuffer);
+        const invMax = maxDensity > 0 ? 1.0 / maxDensity : 0;
+        
+        for (let i = 0; i < w * h; i++) {
+            const density = cpuDensityBuffer[i];
+            if (density > 0) {
+                if (state.colorMethod >= 1) {
+                    const r = Math.min(255, cpuColorBufferR[i] * 255);
+                    const g = Math.min(255, cpuColorBufferG[i] * 255);
+                    const b = Math.min(255, cpuColorBufferB[i] * 255);
+                    data[i * 4] = r;
+                    data[i * 4 + 1] = g;
+                    data[i * 4 + 2] = b;
+                    data[i * 4 + 3] = 255;
+                } else {
+                    const val = Math.min(255, density * invMax * 255);
+                    data[i * 4] = val;
+                    data[i * 4 + 1] = val * 0.5;
+                    data[i * 4 + 2] = val * 0.2;
+                    data[i * 4 + 3] = 255;
+                }
+            }
+        }
+        
+        cpuCtx.putImageData(imageData, 0, 0);
+    }
+    
+    // Update max attribute on supersampling input based on device limits - commented out (UI removed)
+    // const maxSS = getMaxSafeSupersampling();
+    // document.getElementById('param-ss').max = maxSS;
+    // if (state.supersampling > maxSS) {
+    //     state.supersampling = maxSS;
+    //     document.getElementById('param-ss').value = maxSS;
+    //     document.getElementById('val-ss').textContent = `${maxSS}x (max)`;
+    // }
+    
+    // Handle window resize to maintain aspect ratio
+    window.addEventListener('resize', async () => {
+        const dpr = window.devicePixelRatio || 1;
+        // Use full viewport dimensions - canvas extends all the way to left edge
+        const newCanvasWidth = Math.ceil(window.innerWidth * dpr);
+        const newCanvasHeight = Math.ceil(window.innerHeight * dpr);
+        
+        if (canvas.width !== newCanvasWidth || canvas.height !== newCanvasHeight) {
+            canvasWidth = newCanvasWidth;
+            canvasHeight = newCanvasHeight;
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+            canvas.style.width = window.innerWidth + 'px';
+            canvas.style.height = window.innerHeight + 'px';
+            
+            // Update max supersampling based on new canvas size - commented out (UI removed)
+            // const newMaxSS = getMaxSafeSupersampling();
+            // document.getElementById('param-ss').max = newMaxSS;
+            // if (state.supersampling > newMaxSS) {
+            //     state.supersampling = newMaxSS;
+            //     document.getElementById('param-ss').value = newMaxSS;
+            //     document.getElementById('val-ss').textContent = `${newMaxSS}x (max)`;
+            // }
+            
+            // Recreate buffers and resources
+            await updateSupersampling();
+        }
+    });
+    
+    // Mouse controls for pan and zoom
+    let isMouseDown = false; // Track if any mouse button is down for dragging
+    let lastMouseX = 0;
+    let lastMouseY = 0;
+    
+    // Adaptive rendering: track interaction and last render time
+    let isInteracting = false; // True when user is dragging/zooming or using UI
+    let lastRenderTime = performance.now(); // Initialize to current time so first render happens immediately
+    const IDLE_RENDER_INTERVAL = 100; // 10 Hz when idle (100ms = 10/sec)
+    let interactionTimeout = null; // Timeout to reset interaction flag
+    
+    // Helper function to mark UI interaction (triggers full-speed rendering)
+    function markInteraction() {
+        isInteracting = true;
+        // Clear existing timeout
+        if (interactionTimeout) {
+            clearTimeout(interactionTimeout);
+        }
+        // Reset interaction flag after 200ms of inactivity
+        interactionTimeout = setTimeout(() => {
+            isInteracting = false;
+        }, 200);
+    }
+    
+    // Left or right mouse button drag to pan
+    // NOTE: Mouse interactions (drag/zoom) work during attract mode and do NOT stop it
+    canvas.addEventListener('mousedown', (e) => {
+        if (e.button === 0 || e.button === 2) { // Left or right mouse button
+            // Prevent context menu on right-click drag
+            if (e.button === 2) {
+                e.preventDefault();
+            }
+            isMouseDown = true;
+            markInteraction(); // User is interacting
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+            canvas.style.cursor = 'grabbing';
+        }
+    });
+    
+    canvas.addEventListener('mousemove', (e) => {
+        if (isMouseDown) {
+            markInteraction(); // User is dragging
+            const deltaX = e.clientX - lastMouseX;
+            const deltaY = e.clientY - lastMouseY;
+            
+            // Convert screen pixels to fractal space
+            // Scale by current zoom level
+            const dpr = window.devicePixelRatio || 1;
+            const scale = Math.min(canvasWidth, canvasHeight) * 0.2 * state.viewScale;
+            state.viewOffsetX += deltaX * dpr / scale;
+            state.viewOffsetY += deltaY * dpr / scale;
+            
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+            
+            updateParams(); // Update shader parameters
+        }
+    });
+    
+    canvas.addEventListener('mouseup', (e) => {
+        if (e.button === 0 || e.button === 2) { // Left or right mouse button
+            isMouseDown = false;
+            canvas.style.cursor = 'default';
+        }
+    });
+    
+    canvas.addEventListener('mouseleave', () => {
+        isMouseDown = false;
+        canvas.style.cursor = 'default';
+    });
+    
+    // Prevent context menu on right-click (when dragging)
+    canvas.addEventListener('contextmenu', (e) => {
+        if (isMouseDown) {
+            e.preventDefault(); // Prevent context menu during drag
+        }
+    });
+    
+    // Mouse wheel to zoom
+    // NOTE: Mouse wheel works during attract mode and does NOT stop it
+    canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        
+        markInteraction(); // User is zooming
+        
+        // Zoom factor (subtle zoom)
+        const zoomFactor = 1.0 + (e.deltaY > 0 ? -0.1 : 0.1);
+        const newScale = Math.max(0.1, Math.min(10.0, state.viewScale * zoomFactor));
+        
+        // Zoom towards mouse position
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const dpr = window.devicePixelRatio || 1;
+        const canvasMouseX = mouseX * dpr;
+        const canvasMouseY = mouseY * dpr;
+        
+        // Calculate zoom center in fractal space
+        const baseScale = Math.min(canvasWidth, canvasHeight) * 0.2;
+        const oldScale = baseScale * state.viewScale;
+        const fractalX = (canvasMouseX - canvasWidth * 0.5 - state.viewOffsetX * oldScale) / oldScale;
+        const fractalY = (canvasMouseY - canvasHeight * 0.5 - state.viewOffsetY * oldScale) / oldScale;
+        
+        // Update scale
+        state.viewScale = newScale;
+        
+        // Adjust offset to zoom towards mouse position
+        const newScaleValue = baseScale * state.viewScale;
+        state.viewOffsetX = (canvasMouseX - canvasWidth * 0.5) / newScaleValue - fractalX;
+        state.viewOffsetY = (canvasMouseY - canvasHeight * 0.5) / newScaleValue - fractalY;
+        
+        updateParams(); // Update shader parameters
+    });
+
+    updateParams();
+    updateStatusDisplay(); // Initialize status display
+    clearDensity();
+    updateIterCount();
+    
+    // Initialize toggle button state
+    updateToggleButton();
+    
+    // Auto-start the frame loop
+    startFrame();
+
+    // --- ADAPTIVE STATE ---
+    // workgroupCount is declared above (before updateParams) so it's accessible everywhere
+    const TARGET_MS = 16.0; // Target 60 FPS (16.6ms)
+    let lastFrameTime = performance.now();
+    const MAX_DISPATCH = 65535; // WebGPU Limit per single dispatch call
+    let consecutiveSlowFrames = 0; // Track consecutive slow frames for backoff
+    
+    // Throttle updateIterCount() to reduce DOM thrash
+    let lastIterCountUpdate = 0;
+    const ITER_COUNT_THROTTLE_MS = 250; // Update 4× per second
+
+    // --- Main Loop ---
+
+    // CPU compute function (runs simulation in JavaScript using JS RNG, requires WebGPU for buffers)
+    async function runCpuCompute(iterationsPerFrame) {
+        if (!webgpuAvailable || !device) {
+            // Fallback to pure CPU mode
+            runCpuComputePure(iterationsPerFrame);
+            if (cpuCtx) renderCpuToCanvas();
+            return;
+        }
+        const renderDims = getRenderDimensions(state.supersampling);
+        const w = renderDims.width;
+        const h = renderDims.height;
+        const bufferSize = w * h;
+        const bufferSizeBytes = bufferSize * 4;
+        
+        // Create staging buffers for reading (with MAP_READ usage)
+        const stagingDensity = device.createBuffer({
+            size: bufferSizeBytes,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+        });
+        const stagingColorR = device.createBuffer({
+            size: bufferSizeBytes,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+        });
+        const stagingColorG = device.createBuffer({
+            size: bufferSizeBytes,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+        });
+        const stagingColorB = device.createBuffer({
+            size: bufferSizeBytes,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+        });
+        
+        // Copy GPU buffers to staging buffers
+        const encoder = device.createCommandEncoder();
+        encoder.copyBufferToBuffer(densityBuffer, 0, stagingDensity, 0, bufferSizeBytes);
+        if (state.colorMethod >= 1) {
+            encoder.copyBufferToBuffer(colorBufferR, 0, stagingColorR, 0, bufferSizeBytes);
+            encoder.copyBufferToBuffer(colorBufferG, 0, stagingColorG, 0, bufferSizeBytes);
+            encoder.copyBufferToBuffer(colorBufferB, 0, stagingColorB, 0, bufferSizeBytes);
+        }
+        device.queue.submit([encoder.finish()]);
+        
+        // Map and read staging buffers
+        await stagingDensity.mapAsync(GPUMapMode.READ);
+        const densityRead = new Uint32Array(stagingDensity.getMappedRange());
+        
+        let colorR, colorG, colorB;
+        if (state.colorMethod >= 1) {
+            await Promise.all([
+                stagingColorR.mapAsync(GPUMapMode.READ),
+                stagingColorG.mapAsync(GPUMapMode.READ),
+                stagingColorB.mapAsync(GPUMapMode.READ)
+            ]);
+            colorR = new Float32Array(stagingColorR.getMappedRange());
+            colorG = new Float32Array(stagingColorG.getMappedRange());
+            colorB = new Float32Array(stagingColorB.getMappedRange());
+        }
+        
+        // Calculate fractal bounds
+        const originalRangeX = state.originalFractalMaxX - state.originalFractalMinX;
+        const originalRangeY = state.originalFractalMaxY - state.originalFractalMinY;
+        const fractalRangeX = state.fractalMaxX - state.fractalMinX;
+        const fractalRangeY = state.fractalMaxY - state.fractalMinY;
+        const baseScale = Math.min(w, h) * 0.2;
+        const baseRange = 4.0;
+        const maxRange = Math.max(fractalRangeX, fractalRangeY);
+        const scale = baseScale * (baseRange / maxRange) * 0.95;
+        const fractalCenterX = (state.fractalMinX + state.fractalMaxX) * 0.5;
+        const fractalCenterY = (state.fractalMinY + state.fractalMaxY) * 0.5;
+        const centerX = w * 0.5 - fractalCenterX * scale;
+        const centerY = h * 0.5 - fractalCenterY * scale;
+        
+        // Run simulation for each thread
+        const numThreads = Math.min(iterationsPerFrame / 128, 10000); // Limit threads for CPU performance
+        for (let threadIndex = 0; threadIndex < numThreads; threadIndex++) {
+            // Get random starting position using JS RNG
+            const rnd = getRandom2D_JS(threadIndex, state.seed, state.rngMode);
+            let x = state.originalFractalMinX + rnd[0] * originalRangeX;
+            let y = state.originalFractalMinY + rnd[1] * originalRangeY;
+            
+            // Warmup iterations
+            for (let i = 0; i < 12; i++) {
+                const nx = Math.sin(state.a * y) - Math.cos(state.b * x);
+                const ny = Math.sin(state.c * x) - Math.cos(state.d * y);
+                x = nx;
+                y = ny;
+            }
+            
+            // Accumulation iterations
+            let prevX = x;
+            let prevY = y;
+            for (let i = 0; i < 128; i++) {
+                const nx = Math.sin(state.a * y) - Math.cos(state.b * x);
+                const ny = Math.sin(state.c * x) - Math.cos(state.d * y);
+                
+                // Map to screen coordinates
+                const px = x * scale + centerX;
+                const py = y * scale + centerY;
+                const sx = Math.floor(px);
+                const sy = Math.floor(py);
+                
+                if (sx >= 0 && sx < w && sy >= 0 && sy < h) {
+                    const pixelIndex = sy * w + sx;
+                    
+                    // Update density
+                    densityRead[pixelIndex]++;
+                    
+                    // Update color if needed
+                    if (state.colorMethod >= 1) {
+                        let r, g, b;
+                        
+                        // Iteration Hues mode: separate code path
+                        if (state.colorMethod === 5) {
+                            // Normalize iteration count using logarithmic scale (matching shader)
+                            const MAX_ITER_LOG = 12.0; // log2(4096)
+                            const prevCount = densityRead[pixelIndex];
+                            const countF = Math.max(prevCount, 1);
+                            const logCount = Math.log2(countF);
+                            const normalized = Math.max(0, Math.min(1, logCount / MAX_ITER_LOG));
+                            
+                            // Convert to RGB hue
+                            const hueRGB = iterationHueToRGB(normalized);
+                            r = hueRGB[0];
+                            g = hueRGB[1];
+                            b = hueRGB[2];
+                        } else {
+                            // Other color modes
+                            const baseR = Math.abs(prevY - ny);
+                            const baseG = Math.abs(prevX - ny);
+                            const baseB = Math.abs(prevX - nx);
+                            const scaledR = baseR * 2.5;
+                            const scaledG = baseG * 2.5;
+                            const scaledB = baseB * 2.5;
+                            
+                            r = scaledR; g = scaledG; b = scaledB;
+                            switch (state.colorMethod) {
+                                case 2: r = scaledG; g = scaledB; b = scaledR; break;
+                                case 3: r = scaledB; g = scaledR; b = scaledG; break;
+                                case 4: r = scaledB; g = scaledG; b = scaledR; break;
+                            }
+                        }
+                        
+                        const count = densityRead[pixelIndex];
+                        const effCount = Math.min(count, 65535);
+                        const alpha = 1.0 / (effCount + 1);
+                        colorR[pixelIndex] = colorR[pixelIndex] + (r - colorR[pixelIndex]) * alpha;
+                        colorG[pixelIndex] = colorG[pixelIndex] + (g - colorG[pixelIndex]) * alpha;
+                        colorB[pixelIndex] = colorB[pixelIndex] + (b - colorB[pixelIndex]) * alpha;
+                    }
+                }
+                
+                prevX = x;
+                prevY = y;
+                x = nx;
+                y = ny;
+            }
+        }
+        
+        // Write back to GPU buffers
+        device.queue.writeBuffer(densityBuffer, 0, densityRead);
+        if (state.colorMethod >= 1) {
+            device.queue.writeBuffer(colorBufferR, 0, new Uint32Array(colorR.buffer));
+            device.queue.writeBuffer(colorBufferG, 0, new Uint32Array(colorG.buffer));
+            device.queue.writeBuffer(colorBufferB, 0, new Uint32Array(colorB.buffer));
+        }
+        
+        // Unmap staging buffers
+        stagingDensity.unmap();
+        if (state.colorMethod >= 1) {
+            stagingColorR.unmap();
+            stagingColorG.unmap();
+            stagingColorB.unmap();
+        }
+        
+        // Destroy staging buffers
+        stagingDensity.destroy();
+        if (state.colorMethod >= 1) {
+            stagingColorR.destroy();
+            stagingColorG.destroy();
+            stagingColorB.destroy();
+        }
+    }
+    
+    async function frame() {
+        if (!isRunning) return;
+        
+        // Pause when tab is hidden to avoid wasting resources
+        if (document.hidden) {
+            animationFrameId = requestAnimationFrame(frame);
+            return;
+        }
+
+        // 1. MEASURE & PREDICT (Predictive PID Scheduler)
+        // -------------------------------------------------------------
+        // Use the timestamps from the *previous* frame to schedule *this* frame
+        // This creates a closed-loop control system that prevents stutter
+        let dt = TARGET_FRAME_TIME_MS; // Default fallback
+        const now = performance.now();
+        const wallTime = now - lastFrameTime;
+        lastFrameTime = now;
+        
+        // Try to use GPU timestamp from previous frame if available
+        if (enableTimestamps && lastComputeTimeNs !== null) {
+            dt = lastComputeTimeNs / 1e6; // Convert nanoseconds to milliseconds
+        } else {
+            dt = wallTime;
+        }
+        
+        // Calculate raw performance of previous frame
+        // Only update if we have valid timing data
+        // Note: workgroupCount here refers to the count used in the PREVIOUS frame
+        if (dt > 0 && workgroupCount > 0 && !isNaN(dt) && isFinite(dt)) {
+            const instantaneousRate = dt / workgroupCount;
+            
+            // Update our running average (EMA) to smooth out jitter
+            // Alpha of 0.1 means we trust history 90% and new data 10%
+            // This prevents rapid fluctuating of resolution and filters OS jitter
+            avgTimePerWorkgroup = (0.9 * avgTimePerWorkgroup) + (0.1 * instantaneousRate);
+            
+            // Calculate how many workgroups fit in target frame time
+            // Automatically adapts to GPU performance
+            const safeGroupCount = Math.floor(TARGET_FRAME_TIME_MS / avgTimePerWorkgroup);
+            
+            // Apply limits (Min 100, Max 2 Million)
+            // Device-agnostic: automatically adapts to hardware capability
+            let newWorkgroupCount = Math.max(100, Math.min(2000000, safeGroupCount));
+            
+            // Limit workgroup count changes to 20% per frame to prevent visual artifacts
+            // during sudden workload changes
+            const prevCount = workgroupCount;
+            const maxChange = prevCount * 0.2;
+            if (Math.abs(newWorkgroupCount - prevCount) > maxChange) {
+                workgroupCount = prevCount + (newWorkgroupCount > prevCount ? maxChange : -maxChange);
+            } else {
+                workgroupCount = newWorkgroupCount;
+            }
+        }
+        
+        // Limit workgroup count during attract mode animation for consistent framerate
+        if (attractModeActive) {
+            workgroupCount = Math.min(workgroupCount, 40000);
+        }
+
+        // CRITICAL: Cap workgroups during interaction for responsive UI
+        // Prevents GPU queue depth saturation that causes slider freeze
+        if (isInteracting) {
+            workgroupCount = Math.min(workgroupCount, 5000);
+        }
+
+        // 2. CLEAR + RESET (if needed) - do this FIRST before updating params
+        let needsClearPass = false;
+        if (needsClear) {
+            needsClear = false;
+            state.totalIterations = 0;
+            frameCounter = 0; // Reset frame counter on clear
+            frameOffsetCounter = 0; // Reset frame offset counter on clear
+            updateIterCount(); // Always update immediately on clear
+            lastIterCountUpdate = now; // Reset throttle timer
+            needsClearPass = true;
+            // Reset performance estimator on clear for accurate adaptation to new fractal parameters
+            avgTimePerWorkgroup = 0.02; // Calibrated for 128 iterations per thread
+        }
+
+        // 3. UPDATE STATE
+        // Total points = workgroupCount * 64 threads * 128 iterations
+        const iterationsPerFrame = workgroupCount * 64 * 128;
+        state.totalIterations += iterationsPerFrame;
+        
+        // Throttle updateIterCount() to reduce DOM thrash (update only 4× per second)
+        if (now - lastIterCountUpdate > ITER_COUNT_THROTTLE_MS) {
+            updateIterCount();
+            lastIterCountUpdate = now;
+        }
+
+        // 4. UPLOAD PARAMS (after clear/reset, so shader sees correct values)
+        // Write to inactive buffer - this queues the write asynchronously
+        updateParams();
+        
+        // Increment frame offset counter - advance RNG sequence offset every FRAME_OFFSET_INTERVAL frames
+        frameOffsetCounter++;
+        if (frameOffsetCounter >= FRAME_OFFSET_INTERVAL) {
+            frameCounter++;
+            frameOffsetCounter = 0;
+        }
+        
+        // 4b. SWAP PARAMS BUFFERS (double-buffering: swap before encoder creation)
+        // Swap active/inactive buffers BEFORE creating encoder for maximum responsiveness
+        // WebGPU's command queue ensures writeBuffer() completes before commands execute,
+        // so swapping here is safe and gives us the best slider responsiveness
+        const temp = paramsBufferActive;
+        paramsBufferActive = paramsBufferInactive;
+        paramsBufferInactive = temp;
+        // Swap bind group references (zero allocation - no GPU resource creation)
+        const tempComputeBG = computeBindGroupActive;
+        computeBindGroupActive = computeBindGroupInactive;
+        computeBindGroupInactive = tempComputeBG;
+        const tempRenderBG = renderBindGroupActive;
+        renderBindGroupActive = renderBindGroupInactive;
+        renderBindGroupInactive = tempRenderBG;
+        
+        // If WebGPU not available, use pure CPU mode
+        if (!webgpuAvailable) {
+            runCpuComputePure(iterationsPerFrame);
+            renderCpuToCanvas();
+            animationFrameId = requestAnimationFrame(frame);
+            return;
+        }
+        
+        // CPU RNG path: run compute in JavaScript
+        if (useCpuRng) {
+            try {
+                await runCpuCompute(iterationsPerFrame);
+            } catch (e) {
+                console.error('CPU compute error:', e);
+            }
+        }
+        
+        // Always run compute and render (throttling disabled)
+        const computeEncoder = device.createCommandEncoder();
+
+        // 4a. CLEAR PASS (if needed) - use compute shader instead of allocating zero arrays
+        if (needsClearPass && webgpuAvailable && clearPipeline) {
+            const renderDims = getRenderDimensions(state.supersampling);
+            const bufferSize = renderDims.width * renderDims.height;
+            const clearWorkgroupCount = Math.ceil(bufferSize / 256);
+            const clearPass = computeEncoder.beginComputePass();
+            clearPass.setPipeline(clearPipeline);
+            clearPass.setBindGroup(0, computeBindGroupActive);
+            clearPass.dispatchWorkgroups(clearWorkgroupCount);
+            clearPass.end();
+        } else if (needsClearPass && !webgpuAvailable) {
+            // Clear CPU buffers
+            if (cpuDensityBuffer) cpuDensityBuffer.fill(0);
+            if (cpuColorBufferR) cpuColorBufferR.fill(0);
+            if (cpuColorBufferG) cpuColorBufferG.fill(0);
+            if (cpuColorBufferB) cpuColorBufferB.fill(0);
+        }
+
+        // 5. COMPUTE PASS - always runs
+        const passEncoder = computeEncoder.beginComputePass();
+        
+        // Add timestamp queries if supported
+        if (enableTimestamps && timestampQuerySet) {
+            passEncoder.writeTimestamp(timestampQuerySet, 0); // Before compute
+        }
+        
+        // Skip GPU compute if using CPU RNG or WebGPU unavailable
+        if (!useCpuRng && webgpuAvailable && computePipeline) {
+            passEncoder.setPipeline(computePipeline);
+            passEncoder.setBindGroup(0, computeBindGroupActive);
+
+            // Use 2D dispatch for >65535 workgroups to ensure unique indices
+            const dispatchDimX = Math.min(workgroupCount, 65535);
+            const dispatchDimY = Math.ceil(workgroupCount / 65535);
+            passEncoder.dispatchWorkgroups(dispatchDimX, dispatchDimY);
+        }
+        
+        if (enableTimestamps && timestampQuerySet) {
+            passEncoder.writeTimestamp(timestampQuerySet, 1); // After compute
+        }
+        
+        passEncoder.end();
+        
+        // Resolve and copy timestamps if supported
+        if (enableTimestamps && timestampQuerySet) {
+            computeEncoder.resolveQuerySet(timestampQuerySet, 0, 2, timestampBuffer, 0);
+            computeEncoder.copyBufferToBuffer(timestampBuffer, 0, timestampReadbackBuffer, 0, 2 * 8);
+        }
+        
+        // Submit compute immediately (don't wait for render)
+        if (webgpuAvailable && device) {
+            device.queue.submit([computeEncoder.finish()]);
+        }
+
+        // 6. RENDER PASSES (always render - throttling disabled)
+        // If WebGPU not available, skip GPU rendering (CPU mode handles its own rendering)
+        if (!webgpuAvailable) {
+            animationFrameId = requestAnimationFrame(frame);
+            return;
+        }
+        
+        // Validate context and resources before rendering
+        if (!context) {
+            console.warn('WebGPU context not available, skipping render');
+            animationFrameId = requestAnimationFrame(frame);
+            return;
+        }
+        
+        // Validate all required resources before rendering
+        // Note: renderBindGroupActive was just swapped, so it now references the buffer we wrote to
+        if (!renderPipeline || !renderBindGroupActive) {
+            console.warn('Render pipeline or bind group not available, skipping render');
+            animationFrameId = requestAnimationFrame(frame);
+            return;
+        }
+        
+        try {
+            // Get current texture - must be done before creating encoder
+            let currentTexture;
+            try {
+                currentTexture = context.getCurrentTexture();
+            } catch (e) {
+                console.warn('Failed to get current texture:', e);
+                animationFrameId = requestAnimationFrame(frame);
+                return;
+            }
+            
+            const renderEncoder = device.createCommandEncoder();
+            
+            if (state.supersampling > 1 && highResTextureView && downsamplePipeline && downsampleBindGroup) {
+                // High-res render pass
+                const renderPass = renderEncoder.beginRenderPass({
+                    colorAttachments: [{
+                        view: highResTextureView,
+                        loadOp: 'clear', clearValue: { r: 0, g: 0, b: 0, a: 1 }, storeOp: 'store',
+                    }]
+                });
+                renderPass.setPipeline(renderPipeline);
+                renderPass.setBindGroup(0, renderBindGroupActive);
+                renderPass.draw(6);
+                renderPass.end();
+                
+                // Downsample pass
+                const downsamplePass = renderEncoder.beginRenderPass({
+                    colorAttachments: [{
+                        view: currentTexture.createView(),
+                        loadOp: 'clear', clearValue: { r: 0, g: 0, b: 0, a: 1 }, storeOp: 'store',
+                    }]
+                });
+                downsamplePass.setPipeline(downsamplePipeline);
+                downsamplePass.setBindGroup(0, downsampleBindGroup);
+                downsamplePass.draw(6);
+                downsamplePass.end();
+            } else {
+                // Direct render pass
+                const renderPass = renderEncoder.beginRenderPass({
+                    colorAttachments: [{
+                        view: currentTexture.createView(),
+                        loadOp: 'clear', clearValue: { r: 0, g: 0, b: 0, a: 1 }, storeOp: 'store',
+                    }]
+                });
+                renderPass.setPipeline(renderPipeline);
+                renderPass.setBindGroup(0, renderBindGroupActive);
+                renderPass.draw(6);
+                renderPass.end();
+            }
+
+            device.queue.submit([renderEncoder.finish()]);
+        } catch (error) {
+            console.error('Render error:', error);
+            // Continue frame loop even if render fails
+        }
+        
+        // If frame time was very slow, yield to UI thread to prevent freezing
+        if (dt > 100.0) {
+            // Very slow frame (>100ms), yield control briefly
+            setTimeout(() => {
+                animationFrameId = requestAnimationFrame(frame);
+            }, 5);
+            return;
+        }
+        
+        // Read back timestamps for adaptive scaling (use for next frame)
+        if (enableTimestamps && timestampQuerySet) {
+            timestampReadbackBuffer.mapAsync(GPUMapMode.READ).then(() => {
+                const times = new BigUint64Array(timestampReadbackBuffer.getMappedRange());
+                const computeTimeNs = Number(times[1] - times[0]);
+                // Store for use in next frame's adaptive logic
+                lastComputeTimeNs = computeTimeNs;
+                
+                // Optional: log performance info (can be disabled for production)
+                if (false) { // Set to true for debug logging
+                    const renderTimeNs = Number(times[2] - times[1]);
+                    const totalTimeNs = Number(times[2] - times[0]);
+                    console.log(`Performance: Compute=${(computeTimeNs/1e6).toFixed(2)}ms, Render=${(renderTimeNs/1e6).toFixed(2)}ms, Total=${(totalTimeNs/1e6).toFixed(2)}ms`);
+                }
+                timestampReadbackBuffer.unmap();
+            }).catch(() => {
+                // Ignore errors (may happen if buffer is still in use)
+                // Fall back to wall time for this frame
+                lastComputeTimeNs = null;
+            });
+        }
+        
+        // During interaction, yield to allow input events to process
+        if (isInteracting) {
+            await new Promise(r => setTimeout(r, 0));
+        }
+        
+        animationFrameId = requestAnimationFrame(frame);
+    }
+
+    function startFrame() {
+        animationFrameId = requestAnimationFrame(frame);
+    }
+
+    // Start attract mode by default
+    startAttractMode();
+}
+
+init();
+</script>
+</body>
+</html>
