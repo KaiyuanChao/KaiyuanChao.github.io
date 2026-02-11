@@ -2,6 +2,8 @@
 
 A high-performance WebGPU-based strange attractor fractal renderer featuring real-time progressive accumulation, interactive pan/zoom controls, and multiple coloring modes. Renders the Peter de Jong attractor with millions of iterations per frame using GPU compute shaders.
 
+Play with it here - temporary test URL: https://kaiyuanchao.github.io/
+
 ## Features
 
 - **Real-time Progressive Rendering**: Accumulates fractal points over time with stable averaging
@@ -174,3 +176,4 @@ SOFTWARE.
 - Peter de Jong for the attractor equations
 - Sobol sequence research and implementations
 - R2 sequence (Martin Roberts) for optimal 2D low-discrepancy sequences
+
