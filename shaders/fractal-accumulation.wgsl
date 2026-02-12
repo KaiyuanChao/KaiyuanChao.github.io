@@ -1,35 +1,64 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2024-2026
+
 struct Params {
-    a: f32,
-    b: f32,
-    c: f32,
-    d: f32,
-    width: f32,
-    height: f32,
-    exposure: f32,
-    gamma: f32,
-    contrast: f32,
+    // Peter de Jong coefficients: x' = sin(a*y) - cos(b*x), y' = sin(c*x) - cos(d*y).
+    a: f32, b: f32, c: f32, d: f32,
+    
+    // Canvas size in device pixels.
+    width: f32, height: f32,
+    
+    // Tone mapping controls (ACES + gamma/contrast in fragment).
+    exposure: f32, gamma: f32, contrast: f32,
+    
+    // RNG seed (bitcast to u32).
     seed: f32,
+    
+    // Color mode: 0 density, 1–4 RGB shuffles, 5 iteration hue.
     colorMethod: u32,
-    totalIterations: f32,
-    viewOffsetX: f32,
-    viewOffsetY: f32,
-    viewScale: f32,
-    fractalMinX: f32,
-    fractalMaxX: f32,
-    fractalMinY: f32,
-    fractalMaxY: f32,
-    originalFractalMinX: f32,
-    originalFractalMaxX: f32,
-    originalFractalMinY: f32,
-    originalFractalMaxY: f32,
-    rngMode: u32,
-    dispatchDimX: u32,
-    workgroupCount: u32,
-    frameOffset: u32,
+    
+    // Precomputed invTotal for density normalization.
+    invTotal: f32,
+    
+    // View transform in fractal units.
+    viewOffsetX: f32, viewOffsetY: f32, viewScale: f32,
+    
+    // Current fractal bounds (rebased).
+    fractalMinX: f32, fractalMaxX: f32, fractalMinY: f32, fractalMaxY: f32,
+    
+    // Original bounds for random starts (immutable).
+    originalFractalMinX: f32, originalFractalMaxX: f32, originalFractalMinY: f32, originalFractalMaxY: f32,
+    
+    // Compute dispatch metadata.
+    rngMode: u32,        // 0–6 selects RNG
+    dispatchDimX: u32,   // For 2D dispatch when workgroups > 65535
+    workgroupCount: u32, // Total workgroups this frame
+    frameOffsetLo: u32,  // Cumulative RNG index offset (low 32 bits)
+    frameOffsetHi: u32,  // Cumulative RNG index offset (high 32 bits)
+    frameId: u32,        // Monotonic frame counter (for per-frame variation)
+    r2StartX: f32,       // CPU fract(frameOffset * R2_ALPHA) for precision mode
+    r2StartY: f32,       // CPU fract(frameOffset * R2_BETA) for precision mode
+    // CPU precomputed accumulation buffer center (floating origin anchor).
+    viewBufferCenterX: f32,
+    viewBufferCenterY: f32,
+
+    // View center in attractor space [-2,2] to avoid cancellation on deep zoom.
+    attractorCenterX: f32,
+    attractorCenterY: f32,
+    // Pixels per attractor unit (CPU precomputed).
+    attractorPixelScale: f32,
+    
+    // Adaptive iteration count for deep zoom.
+    iterationCount: u32,
+    
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,  // 16-byte alignment (160 bytes total)
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<storage, read_write> densityBuffer: array<atomic<u32>>;
+// Color average buffers (float32 via bitcast) for running average accumulation.
 @group(0) @binding(2) var<storage, read_write> colorBufferR: array<atomic<u32>>;
 @group(0) @binding(3) var<storage, read_write> colorBufferG: array<atomic<u32>>;
 @group(0) @binding(4) var<storage, read_write> colorBufferB: array<atomic<u32>>;
@@ -38,7 +67,10 @@ struct Params {
 @group(0) @binding(7) var<storage, read> colorReadG: array<u32>;
 @group(0) @binding(8) var<storage, read> colorReadB: array<u32>;
 
-// --- RNG Helper Functions ---
+// Color range and fixed-point scale for sum accumulation.
+const RGB10_SCALE: f32 = 16.0;
+
+// --- RNG helpers ---
 
 fn hash12(p: vec2<f32>) -> f32 {
     var p3 = fract(vec3<f32>(p.xyx) * .1031);
@@ -72,6 +104,7 @@ fn lkPermute(x: u32, seed: u32) -> u32 {
     v ^= v * 0xb82f1e52u;
     v ^= v * 0xc7afe638u;
     v ^= v * 0x8d22f6e6u;
+    v ^= v >> 16u; // Mix high bits into LSBs for strict Owen + reverseBits.
     return v;
 }
 
@@ -104,14 +137,50 @@ fn sobol2dScrambled(index: u32, seed: u32) -> vec2<f32> {
     return vec2<f32>(toUnit(x), toUnit(y));
 }
 
-// R2 Constants
-const R2_ALPHA: f32 = 0.7548776662466927;
-const R2_BETA: f32 = 0.5698402909980532;
-const PHI_INV: f32 = 0.6180339887498949;
+// Practical Owen/Sobol 0,2 scramble for sampling (avoids fast visual repeats).
+// Key change vs strict Owen: we DO NOT reverseBits() the final per-dimension permute
+// before toUnit(), so weak low bits from lkPermute never become "big" float bits.
+fn sobol2dOwenOptimized(index: u32, seed: u32) -> vec2<f32> {
+    // v = lkPermute(reverseBits(index), seed)
+    var v = reverseBits(index) + seed;
+    v ^= v * 0x6c50b47cu;
+    v ^= v * 0xb82f1e52u;
+    v ^= v * 0xc7afe638u;
+    v ^= v * 0x8d22f6e6u;
+
+    // Sobol (0,2) in the same "van der Corput domain".
+    let g = v ^ (v >> 1u);
+
+    // Final per-dimension decorrelation (LK core), but feed toUnit() directly.
+    // Using vec2<u32> encourages ILP / keeps code tight.
+    var xy = vec2<u32>(
+        v + (seed ^ 0xa511e9b3u),
+        g + (seed ^ 0x63d83595u)
+    );
+
+    xy ^= xy * 0x6c50b47cu;
+    xy ^= xy * 0xb82f1e52u;
+    xy ^= xy * 0xc7afe638u;
+    xy ^= xy * 0x8d22f6e6u;
+
+    return vec2<f32>(toUnit(xy.x), toUnit(xy.y));
+}
+
+// R2 constants: 2D Golden Ratio (avoid 3D Plastic Number artifacts).
+
+// Fixed-point R2 increments (floor(2^32 * 1/φ, 1/φ²)); odd => full period.
+const R2_INC_X: u32 = 0x9E3779B9u;  // 2654435769 ≈ 2^32 / φ
+const R2_INC_Y: u32 = 0x61C88647u;  // 1640531527 ≈ 2^32 / φ²
+
+// Float R2 deltas (single-step only; fixed-point for index math).
+const R2_ALPHA: f32 = 0.6180339887498949; // 1/φ (Golden Ratio, single-step delta, f32 exact)
+const R2_BETA: f32 = 0.3819660112501052;  // 1/φ² (single-step delta, f32 exact)
 
 fn r2Sequence(index: u32) -> vec2<f32> {
-    let n = f32(index);
-    return fract(vec2<f32>(n * R2_ALPHA, n * R2_BETA));
+    // Fixed-point: (index * INC) mod 2^32.
+    let x = index * R2_INC_X;
+    let y = index * R2_INC_Y;
+    return vec2<f32>(toUnit(x), toUnit(y));
 }
 
 fn cpOffset(seed: f32) -> vec2<f32> {
@@ -125,36 +194,137 @@ fn r2WithRotation(index: u32, seed: f32) -> vec2<f32> {
     return fract(r2Sequence(index) + cpOffset(seed));
 }
 
-fn xorshift32(state: u32) -> u32 {
-    var s = state;
-    s ^= s << 13u;
-    s ^= s >> 17u;
-    s ^= s << 5u;
-    return s;
+// Integer hash RNG (avoids f32 precision loss at large indices).
+fn rand2_u32(index: u32, seedHash: u32) -> vec2<f32> {
+    let x = hash32(index ^ seedHash);
+    let y = hash32((index + 0x9e3779b9u) ^ seedHash);
+    return vec2<f32>(toUnit(x), toUnit(y));
+}
+
+// Combined LCG (2 classic LCGs, raw output).
+fn combinedLCG(index: u32, seedHash: u32) -> vec2<f32> {
+    // Init states from index + seed.
+    var state1 = u32(index) ^ seedHash;
+    var state2 = u32(index + 0x9e3779b9u) ^ seedHash;
+    
+    // LCG1: Numerical Recipes.
+    state1 = 1664525u * state1 + 1013904223u;
+    
+    // LCG2: Borland.
+    state2 = 134775813u * state2 + 1u;
+    
+    // Combine via XOR; shift to decorrelate X/Y.
+    let combinedX = state1 ^ state2;
+    let combinedY = (state1 << 16u) ^ (state2 >> 16u);
+    
+    // Normalize to [0,1) without redistribution.
+    return vec2<f32>(
+        f32(combinedX) / 4294967296.0,
+        f32(combinedY) / 4294967296.0
+    );
 }
 
 fn getRandom2D(index: u32, seed: f32, rngMode: u32) -> vec2<f32> {
+    let seedBits = bitcast<u32>(seed);
+    
     switch rngMode {
+        case 6u: {
+            // Combined LCG: raw random; mix frameId for per-frame variation.
+            let frameMix = hash32(params.frameId ^ 0x9e3779b9u);
+            let seedHash = hash32(seedBits ^ frameMix);
+            return combinedLCG(index, seedHash);
+        }
+        case 5u: {
+            // Owen-Sobol: keep scramble stable; use CP rotation per 2^32 wrap.
+            let seedHash = hash32(seedBits);
+            let wrapOffset = cpOffset(f32(params.frameOffsetHi));
+            return fract(sobol2dOwenOptimized(index, seedHash) + wrapOffset);
+        }
+        case 4u: {
+            // R2 precision: return thread start; caller advances by add recurrence.
+            let threadBase = (index / 128u) * 128u;
+            let baseBitsX = threadBase * R2_INC_X;
+            let baseBitsY = threadBase * R2_INC_Y;
+            return fract(vec2<f32>(
+                params.r2StartX + toUnit(baseBitsX),
+                params.r2StartY + toUnit(baseBitsY)
+            ));
+        }
         case 3u: {
-            let seedHash = hash32(bitcast<u32>(seed));
-            return sobol2dPure(index, seedHash);
+            // Sobol pure; CP rotation per 2^32 wrap.
+            let seedHash = hash32(seedBits);
+            let wrapOffset = cpOffset(f32(params.frameOffsetHi));
+            return fract(sobol2dPure(index, seedHash) + wrapOffset);
         }
         case 2u: {
-            return r2WithRotation(index, seed);
+            // R2 legacy: apply CP rotation per 2^32 wrap.
+            let wrapOffset = cpOffset(f32(params.frameOffsetHi));
+            return fract(r2Sequence(index) + wrapOffset);
         }
         case 1u: {
-            let seedHash = hash32(bitcast<u32>(seed));
-            return sobol2dScrambled(index, seedHash);
+            // Sobol scrambled; CP rotation per 2^32 wrap.
+            let seedHash = hash32(seedBits);
+            let wrapOffset = cpOffset(f32(params.frameOffsetHi));
+            return fract(sobol2dScrambled(index, seedHash) + wrapOffset);
         }
         default: {
-            let hashX = hash12(vec2<f32>(f32(index), seed));
-            let hashY = hash12(vec2<f32>(f32(index) + 13.0, seed));
-            return vec2<f32>(hashX, hashY);
+            // Hash RNG: integer hash + frameId for variation.
+            let frameMix = hash32(params.frameId ^ 0x9e3779b9u);
+            let seedHash = hash32(seedBits ^ frameMix);
+            return rand2_u32(index, seedHash);
         }
     }
 }
 
-// Helper for Hue to RGB
+// Compute how many color updates have occurred for a given lastCount (prevCount).
+fn colorUpdateCount(lastCount: u32) -> f32 {
+    let logCount = 31u - countLeadingZeros(lastCount | 1u);
+    let tier = max(0i, i32(logCount) - 6);
+    if (tier <= 0) {
+        return f32(lastCount) + 1.0;
+    }
+    let throttleBits = min(u32(tier) + 3u, 10u);
+    let stride = 1u << throttleBits;
+    let tierStart = 1u << (u32(tier) + 6u);
+    let priorTierUpdates = 8u * u32(max(0i, tier - 1));
+    let updatesInTier = (lastCount - tierStart) / stride;
+    return f32(128u + 1u + priorTierUpdates + updatesInTier);
+}
+
+// Maximum color updates before considering pixel "converged".
+const MAX_COLOR_UPDATES: f32 = 100000.0;
+
+// Atomic CAS-based float32 running average blend for RGB channels.
+fn atomicBlendRGBIndex(
+    index: u32,
+    rgb: vec3<f32>,
+    alpha: f32
+) {
+    var oldR = atomicLoad(&colorBufferR[index]);
+    var oldG = atomicLoad(&colorBufferG[index]);
+    var oldB = atomicLoad(&colorBufferB[index]);
+
+    for (var k = 0u; k < 8u; k++) {
+        let oldVec = vec3<f32>(
+            bitcast<f32>(oldR),
+            bitcast<f32>(oldG),
+            bitcast<f32>(oldB)
+        );
+        let newVec = oldVec + (rgb - oldVec) * alpha;
+
+        let resR = atomicCompareExchangeWeak(&colorBufferR[index], oldR, bitcast<u32>(newVec.r));
+        let resG = atomicCompareExchangeWeak(&colorBufferG[index], oldG, bitcast<u32>(newVec.g));
+        let resB = atomicCompareExchangeWeak(&colorBufferB[index], oldB, bitcast<u32>(newVec.b));
+
+        if (resR.exchanged && resG.exchanged && resB.exchanged) { return; }
+
+        if (!resR.exchanged) { oldR = resR.old_value; }
+        if (!resG.exchanged) { oldG = resG.old_value; }
+        if (!resB.exchanged) { oldB = resB.old_value; }
+    }
+}
+
+// Hue -> RGB helper.
 fn iterationHueToRGB(t: f32) -> vec3<f32> {
     let clamped = clamp(t, 0.0, 1.0);
     let a = vec3<f32>(0.5, 0.5, 0.5);
@@ -166,190 +336,323 @@ fn iterationHueToRGB(t: f32) -> vec3<f32> {
 
 // --- COMPUTE SHADER ---
 
-@compute @workgroup_size(256)
-fn clearMain(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let index = global_id.x;
-    let w = u32(params.width);
-    let h = u32(params.height);
-    let bufferSize = w * h;
-    
-    if (index < bufferSize) {
-        atomicExchange(&densityBuffer[index], 0u);
-        atomicExchange(&colorBufferR[index], 0u);
-        atomicExchange(&colorBufferG[index], 0u);
-        atomicExchange(&colorBufferB[index], 0u);
-    }
-}
-
 @compute @workgroup_size(64)
-fn computeMain(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(workgroup_id) wg_id: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>) {
+fn computeMainDensity(
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>
+) {
     let groupIndex = wg_id.x + wg_id.y * params.dispatchDimX;
     if (groupIndex >= params.workgroupCount) { return; }
     let threadIndex = groupIndex * 64u + local_id.x;
-    let index = threadIndex + params.frameOffset;
-    
+    let index = threadIndex + params.frameOffsetLo;
+
+    // RNG setup (same as computeMain, but density-only never needs jitter).
+    var r2State: vec2<f32> = vec2<f32>(0.0);
+    let useR2Precision = params.rngMode == 4u;
+    if (useR2Precision) {
+        let needsJitter = false;
+        let stride: u32 = select(1u, 129u, needsJitter);
+        let threadSampleOffset = threadIndex * stride;
+        let threadOffsetBitsX = threadSampleOffset * R2_INC_X;
+        let threadOffsetBitsY = threadSampleOffset * R2_INC_Y;
+        r2State = fract(vec2<f32>(
+            params.r2StartX + toUnit(threadOffsetBitsX),
+            params.r2StartY + toUnit(threadOffsetBitsY)
+        ));
+        if (params.frameOffsetHi != 0u) {
+            let wrapOffset = cpOffset(f32(params.frameOffsetHi));
+            r2State = fract(r2State + wrapOffset);
+        }
+    }
+
+    // Get initial random values.
+    var rnd: vec2<f32>;
+    if (useR2Precision) {
+        rnd = r2State;
+        r2State = fract(r2State + vec2<f32>(R2_ALPHA, R2_BETA));
+    } else {
+        rnd = getRandom2D(index, params.seed, params.rngMode);
+    }
+
+    // Starting point: original bounds.
     let originalRangeX = params.originalFractalMaxX - params.originalFractalMinX;
     let originalRangeY = params.originalFractalMaxY - params.originalFractalMinY;
-    let rnd = getRandom2D(index, params.seed, params.rngMode);
-    var x = params.originalFractalMinX + rnd.x * originalRangeX;
-    var y = params.originalFractalMinY + rnd.y * originalRangeY;
+    let originalCenterX = params.originalFractalMinX + originalRangeX * 0.5;
+    let originalCenterY = params.originalFractalMinY + originalRangeY * 0.5;
 
-    let w = u32(params.width);
-    let h = u32(params.height);
-    let fractalRangeX = params.fractalMaxX - params.fractalMinX;
-    let fractalRangeY = params.fractalMaxY - params.fractalMinY;
-    
-    let baseScale = min(params.width, params.height) * 0.2;
-    let baseRange = 4.0;
-    let maxRange = max(fractalRangeX, fractalRangeY);
-    let scale = baseScale * (baseRange / maxRange) * 0.95;
-    
-    let fractalCenterX = (params.fractalMinX + params.fractalMaxX) * 0.5;
-    let fractalCenterY = (params.fractalMinY + params.fractalMaxY) * 0.5;
-    let centerX = params.width * 0.5 - fractalCenterX * scale;
-    let centerY = params.height * 0.5 - fractalCenterY * scale;
+    var x = originalCenterX + (rnd.x - 0.5) * originalRangeX;
+    var y = originalCenterY + (rnd.y - 0.5) * originalRangeY;
 
-    for(var i = 0; i < 12; i++) {
+    // Warmup (settle onto attractor).
+    for (var j = 0; j < 12; j++) {
         let nx = sin(params.a * y) - cos(params.b * x);
         let ny = sin(params.c * x) - cos(params.d * y);
         x = nx;
         y = ny;
     }
 
-    var jitterState: u32 = 0u;
-    let needsJitter = params.colorMethod != 0u;
-    if (needsJitter) {
-        jitterState = hash32(index ^ bitcast<u32>(params.seed));
-    }
+    if (x * x + y * y > 16.0) { return; }
 
-    var prevX = x;
-    var prevY = y;
+    // Adaptive accumulation (density-only).
+    let w = u32(params.width);
+    let h = u32(params.height);
+    let scale = params.attractorPixelScale;
+    let halfW = params.width * 0.5;
+    let halfH = params.height * 0.5;
+
+    var sinAY = sin(params.a * y);
+    var cosBX = cos(params.b * x);
+    var sinCX = sin(params.c * x);
+    var cosDY = cos(params.d * y);
+
+    var hitCount = 0u;
+    var itersSinceHit = 0u;
+
+    for (var i = 0u; i < params.iterationCount; i++) {
+        let nx = sinAY - cosBX;
+        let ny = sinCX - cosDY;
+
+        if (nx * nx + ny * ny > 16.0) { break; }
+
+        let next_sinAY = sin(params.a * ny);
+        let next_cosBX = cos(params.b * nx);
+        let next_sinCX = sin(params.c * nx);
+        let next_cosDY = cos(params.d * ny);
+
+        let dx = nx - params.attractorCenterX;
+        let dy = ny - params.attractorCenterY;
+
+        let px = fma(dx, scale, halfW);
+        let py = fma(dy, scale, halfH);
+        // Floor for negative values without calling floor().
+        let sx = i32(px * 65536.0) >> 16;
+        let sy = i32(py * 65536.0) >> 16;
+
+        if (u32(sx) < w && u32(sy) < h) {
+            let pixelIndex = u32(sy) * w + u32(sx);
+            atomicAdd(&densityBuffer[pixelIndex], 1u);
+            hitCount += 1u;
+            itersSinceHit = 0u;
+        } else {
+            itersSinceHit += 1u;
+
+            // EARLY EXIT: Never found viewport.
+            let neverHitLimit = select(512u, 256u, scale > 5000.0);
+            if (hitCount == 0u && i >= neverHitLimit) { break; }
+
+            // EARLY EXIT: Was productive but wandered off.
+            let missLimit = select(256u, 64u, scale > 5000.0);
+            if (hitCount > 0u && itersSinceHit > missLimit) { break; }
+        }
+
+        x = nx;
+        y = ny;
+        sinAY = next_sinAY;
+        cosBX = next_cosBX;
+        sinCX = next_sinCX;
+        cosDY = next_cosDY;
+    }
+}
+
+@compute @workgroup_size(64)
+fn computeMain(
+    @builtin(global_invocation_id) global_id: vec3<u32>,
+    @builtin(workgroup_id) wg_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>
+) {
+    let groupIndex = wg_id.x + wg_id.y * params.dispatchDimX;
+    if (groupIndex >= params.workgroupCount) { return; }
+    let threadIndex = groupIndex * 64u + local_id.x;
+    let index = threadIndex + params.frameOffsetLo;
+    
+    // ═══════════════════════════════════════════════════════════════════════
+    // RNG SETUP (existing logic preserved)
+    // ═══════════════════════════════════════════════════════════════════════
+    
+    var r2State: vec2<f32> = vec2<f32>(0.0);
+    let useR2Precision = params.rngMode == 4u;
+    if (useR2Precision) {
+        let needsJitter = params.colorMethod != 0u;
+        let stride: u32 = select(1u, 129u, needsJitter);
+        let threadSampleOffset = threadIndex * stride;
+        let threadOffsetBitsX = threadSampleOffset * R2_INC_X;
+        let threadOffsetBitsY = threadSampleOffset * R2_INC_Y;
+        r2State = fract(vec2<f32>(
+            params.r2StartX + toUnit(threadOffsetBitsX),
+            params.r2StartY + toUnit(threadOffsetBitsY)
+        ));
+        if (params.frameOffsetHi != 0u) {
+            let wrapOffset = cpOffset(f32(params.frameOffsetHi));
+            r2State = fract(r2State + wrapOffset);
+        }
+    }
+    
+    // Get initial random values
+    var rnd: vec2<f32>;
+    if (useR2Precision) {
+        rnd = r2State;
+        r2State = fract(r2State + vec2<f32>(R2_ALPHA, R2_BETA));
+    } else {
+        rnd = getRandom2D(index, params.seed, params.rngMode);
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════
+    // STARTING POINT: Always use original bounds (standard sampling)
+    // ═══════════════════════════════════════════════════════════════════════
+    
+    let originalRangeX = params.originalFractalMaxX - params.originalFractalMinX;
+    let originalRangeY = params.originalFractalMaxY - params.originalFractalMinY;
+    let originalCenterX = params.originalFractalMinX + originalRangeX * 0.5;
+    let originalCenterY = params.originalFractalMinY + originalRangeY * 0.5;
+    
+    var x = originalCenterX + (rnd.x - 0.5) * originalRangeX;
+    var y = originalCenterY + (rnd.y - 0.5) * originalRangeY;
+    
+    // ═══════════════════════════════════════════════════════════════════════
+    // WARMUP (settle onto attractor)
+    // ═══════════════════════════════════════════════════════════════════════
+    
+    for (var i = 0; i < 12; i++) {
+        let nx = sin(params.a * y) - cos(params.b * x);
+        let ny = sin(params.c * x) - cos(params.d * y);
+        x = nx;
+        y = ny;
+    }
+    
+    if (x * x + y * y > 16.0) { return; }
+    
+    // ═══════════════════════════════════════════════════════════════════════
+    // ADAPTIVE ACCUMULATION (extended iterations + early exit)
+    // ═══════════════════════════════════════════════════════════════════════
+    
+    let w = u32(params.width);
+    let h = u32(params.height);
+    let scale = params.attractorPixelScale;
+    let halfW = params.width * 0.5;
+    let halfH = params.height * 0.5;
+    
     var sinAY = sin(params.a * y);
     var cosBX = cos(params.b * x);
     var sinCX = sin(params.c * x);
     var cosDY = cos(params.d * y);
     
-    // Accumulation loop: 128 iterations to match JavaScript calculations
-    // Each iteration computes one point and plots it to the density/color buffers
-    for (var i = 0; i < 128; i++) {
+    var jitterState: u32 = 0u;
+    let needsJitter = params.colorMethod != 0u;
+    if (needsJitter) {
+        let seedBits = bitcast<u32>(params.seed);
+        let frameMix = hash32(params.frameId ^ 0x9e3779b9u);
+        jitterState = (index ^ hash32(seedBits ^ frameMix)) * 747796405u + 2891336453u;
+    }
+    
+    var prevX = x;
+    var prevY = y;
+    var hitCount = 0u;
+    var itersSinceHit = 0u;
+    
+    for (var i = 0u; i < params.iterationCount; i++) {
         let nx = sinAY - cosBX;
         let ny = sinCX - cosDY;
+        
+        if (nx * nx + ny * ny > 16.0) { break; }
+        
+        let next_sinAY = sin(params.a * ny);
+        let next_cosBX = cos(params.b * nx);
+        let next_sinCX = sin(params.c * nx);
+        let next_cosDY = cos(params.d * ny);
+        
+        let dx = nx - params.attractorCenterX;
+        let dy = ny - params.attractorCenterY;
+        
+        var jitter = vec2<f32>(0.0);
+        if (needsJitter) {
+            jitterState = jitterState * 747796405u + 2891336453u;
+            jitter = vec2<f32>(
+                f32(jitterState & 0xFFFFu) / 65536.0 - 0.5,
+                f32(jitterState >> 16u) / 65536.0 - 0.5
+            );
+        }
+        
+        // fma() keeps a single rounding step; some drivers already fuse mul+add,
+        // so this may or may not improve precision (performance is typically neutral).
+        let px = fma(dx, scale, halfW);
+        let py = fma(dy, scale, halfH);
+        let sx = i32((px + jitter.x) * 65536.0) >> 16;
+        let sy = i32((py + jitter.y) * 65536.0) >> 16;
+        
+        if (u32(sx) < w && u32(sy) < h) {
+            let pixelIndex = u32(sy) * w + u32(sx);
+            
+            if (params.colorMethod == 0u) {
+                atomicAdd(&densityBuffer[pixelIndex], 1u);
+            } else {
+                let prevCount = atomicAdd(&densityBuffer[pixelIndex], 1u);
+                
+                let logCount = 31u - countLeadingZeros(prevCount | 1u);
+                let tier = max(0i, i32(logCount) - 6);
+                let throttleBits = min(u32(max(0i, tier)) + 3u, 10u);
+                let mask = select(0u, (1u << throttleBits) - 1u, tier > 0);
+                let shouldUpdateColor = (prevCount & mask) == 0u;
+                
+                if (shouldUpdateColor) {
+                    let colorUpdates = colorUpdateCount(prevCount);
+                    
+                    if (colorUpdates <= MAX_COLOR_UPDATES) {
+                        var rgb: vec3<f32>;
+                        
+                        if (params.colorMethod == 5u) {
+                            const MAX_ITER_LOG: f32 = 12.0;
+                            let countF = f32(prevCount);
+                            let logCountF = log2(max(countF, 1.0));
+                            let normalized = clamp(logCountF / MAX_ITER_LOG, 0.0, 1.0);
+                            rgb = iterationHueToRGB(normalized) * RGB10_SCALE;
+                        } else {
+                            let base = abs(vec3<f32>(prevY - ny, prevX - ny, prevX - nx)) * 2.5;
+                            switch params.colorMethod {
+                                case 1u: { rgb = vec3<f32>(base.x, base.y, base.z); }
+                                case 2u: { rgb = vec3<f32>(base.y, base.z, base.x); }
+                                case 3u: { rgb = vec3<f32>(base.z, base.x, base.y); }
+                                case 4u: { rgb = vec3<f32>(base.z, base.y, base.x); }
+                                default: { rgb = base; }
+                            }
+                        }
+                        
+                        rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(RGB10_SCALE));
+                        
+                        if (prevCount == 0u) {
+                            atomicStore(&colorBufferR[pixelIndex], bitcast<u32>(rgb.r));
+                            atomicStore(&colorBufferG[pixelIndex], bitcast<u32>(rgb.g));
+                            atomicStore(&colorBufferB[pixelIndex], bitcast<u32>(rgb.b));
+                        } else {
+                            let alpha = 1.0 / colorUpdates;
+                            atomicBlendRGBIndex(pixelIndex, rgb, alpha);
+                        }
+                    }
+                }
+            }
+            
+            hitCount += 1u;
+            itersSinceHit = 0u;
+        } else {
+            itersSinceHit += 1u;
+            
+            // EARLY EXIT: Never found viewport - trajectory isn't passing through visible region
+            let neverHitLimit = select(512u, 256u, scale > 5000.0);
+            if (hitCount == 0u && i >= neverHitLimit) { break; }
+            
+            // EARLY EXIT: Was productive but wandered off - won't likely return at deep zoom
+            // Threshold is tighter when zoomed in (scale > 5000 means >~25× zoom)
+            let missLimit = select(256u, 64u, scale > 5000.0);
+            if (hitCount > 0u && itersSinceHit > missLimit) { break; }
+        }
         
         prevX = x;
         prevY = y;
         x = nx;
         y = ny;
-        
-        sinAY = sin(params.a * y);
-        cosBX = cos(params.b * x);
-        sinCX = sin(params.c * x);
-        cosDY = cos(params.d * y);
-
-        var jitter = vec2<f32>(0.0, 0.0);
-        if (needsJitter) {
-            jitterState = xorshift32(jitterState);
-            let h = jitterState;
-            jitter = vec2<f32>(
-                f32(h & 0xFFFFu) / 65536.0 - 0.5,
-                f32(h >> 16u) / 65536.0 - 0.5
-            );
-        }
-
-        let px: f32 = x * scale + centerX;
-        let py: f32 = y * scale + centerY;
-        let sx: i32 = i32(floor(px + jitter.x));
-        let sy: i32 = i32(floor(py + jitter.y));
-
-        if (sx >= 0 && sx < i32(w) && sy >= 0 && sy < i32(h)) {
-            let pixelIndex = u32(sy) * w + u32(sx);
-            
-            if (params.colorMethod == 0u) {
-                atomicAdd(&densityBuffer[pixelIndex], 1u);
-                continue;
-            }
-            
-            let prevCount: u32 = atomicAdd(&densityBuffer[pixelIndex], 1u);
-            let mask = select(0u, 7u, prevCount > 256u);
-            let shouldUpdateColor = (prevCount & mask) == 0u;
-            
-            // --- Determine Color ---
-            var r: f32 = 0.0;
-            var g: f32 = 0.0;
-            var b: f32 = 0.0;
-            var alpha: f32 = 0.0;
-
-            if (params.colorMethod == 5u && shouldUpdateColor) {
-                const MAX_ITER_LOG: f32 = 12.0;
-                let countF = f32(prevCount);
-                let logCount = log2(max(countF, 1.0));
-                let normalized = clamp(logCount / MAX_ITER_LOG, 0.0, 1.0);
-                let hueRGB = iterationHueToRGB(normalized);
-                r = hueRGB.r; g = hueRGB.g; b = hueRGB.b;
-                
-                let effCount: u32 = min(prevCount, 65535u);
-                let weightScalar = select(1.0, 8.0, prevCount > 256u);
-                alpha = (1.0 / f32(effCount + 1u)) * weightScalar;
-            } else if (shouldUpdateColor) {
-                let baseR = abs(prevY - ny);
-                let baseG = abs(prevX - ny);
-                let baseB = abs(prevX - nx);
-                let scaledR = baseR * 2.5;
-                let scaledG = baseG * 2.5;
-                let scaledB = baseB * 2.5;
-                
-                switch params.colorMethod {
-                    case 1u: { r = scaledR; g = scaledG; b = scaledB; }
-                    case 2u: { r = scaledG; g = scaledB; b = scaledR; }
-                    case 3u: { r = scaledB; g = scaledR; b = scaledG; }
-                    case 4u: { r = scaledB; g = scaledG; b = scaledR; }
-                    default: { r = scaledR; g = scaledG; b = scaledB; }
-                }
-                
-                let effCount: u32 = min(prevCount, 65535u);
-                let weightScalar = select(1.0, 8.0, prevCount > 256u);
-                alpha = (1.0 / f32(effCount + 1u)) * weightScalar;
-            }
-
-            if (shouldUpdateColor) {
-                // Atomic color channel update (inlined for WGSL compatibility)
-                // Update RED
-                {
-                    var oldBits = atomicLoad(&colorBufferR[pixelIndex]);
-                    for (var k = 0u; k < 3u; k++) {
-                        let oldVal = bitcast<f32>(oldBits);
-                        let newVal = oldVal + (r - oldVal) * alpha;
-                        let newBits = bitcast<u32>(newVal);
-                        let res = atomicCompareExchangeWeak(&colorBufferR[pixelIndex], oldBits, newBits);
-                        if (res.exchanged) { break; }
-                        oldBits = res.old_value;
-                    }
-                }
-                // Update GREEN
-                {
-                    var oldBits = atomicLoad(&colorBufferG[pixelIndex]);
-                    for (var k = 0u; k < 3u; k++) {
-                        let oldVal = bitcast<f32>(oldBits);
-                        let newVal = oldVal + (g - oldVal) * alpha;
-                        let newBits = bitcast<u32>(newVal);
-                        let res = atomicCompareExchangeWeak(&colorBufferG[pixelIndex], oldBits, newBits);
-                        if (res.exchanged) { break; }
-                        oldBits = res.old_value;
-                    }
-                }
-                // Update BLUE
-                {
-                    var oldBits = atomicLoad(&colorBufferB[pixelIndex]);
-                    for (var k = 0u; k < 3u; k++) {
-                        let oldVal = bitcast<f32>(oldBits);
-                        let newVal = oldVal + (b - oldVal) * alpha;
-                        let newBits = bitcast<u32>(newVal);
-                        let res = atomicCompareExchangeWeak(&colorBufferB[pixelIndex], oldBits, newBits);
-                        if (res.exchanged) { break; }
-                        oldBits = res.old_value;
-                    }
-                }
-            }
-        }
+        sinAY = next_sinAY;
+        cosBX = next_cosBX;
+        sinCX = next_sinCX;
+        cosDY = next_cosDY;
     }
 }
 
@@ -360,13 +663,13 @@ struct VertexOutput {
     @location(0) uv: vec2<f32>,
 };
 
-const pos: array<vec2<f32>, 6> = array<vec2<f32>, 6>(
-    vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(-1.0, 1.0),
-    vec2<f32>(-1.0, 1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0)
-);
-
 @vertex
 fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+    // Keep array inside function to avoid older backend issues.
+    let pos = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(-1.0, 1.0),
+        vec2<f32>(-1.0, 1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0)
+    );
     var output: VertexOutput;
     output.position = vec4<f32>(pos[vertexIndex], 0.0, 1.0);
     output.uv = pos[vertexIndex] * 0.5 + 0.5;
@@ -385,15 +688,85 @@ fn getGradient(t: f32) -> vec3<f32> {
     return mix(col3, col4, (t - 0.66) * 3.0);
 }
 
+// ACES filmic tone mapping.
+fn toneMapACES(v: vec3<f32>, exposure: f32) -> vec3<f32> {
+    let x = v * exposure * 0.6;
+    let a = 2.51; let b = 0.03;
+    let c = 2.43; let d = 0.59; let e = 0.14;
+    return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
+}
+
+// Tone mapping helper: ACES + optional saturation + gamma/contrast.
+fn applyToneMapping(rawR: f32, rawG: f32, rawB: f32, boostSaturation: bool) -> vec3<f32> {
+    // ACES outputs [0,1] via saturate().
+    var color = toneMapACES(vec3<f32>(rawR, rawG, rawB), params.exposure);
+
+    if (boostSaturation) {
+        let maxVal = max(max(color.r, color.g), color.b);
+        let minVal = min(min(color.r, color.g), color.b);
+        let delta = maxVal - minVal;
+        if (delta > 0.001 && maxVal > 0.001) {
+            let saturation = delta / maxVal;
+            let newSaturation = min(1.0, saturation * 1.5);
+            let scale = newSaturation / saturation;
+            color = minVal + (color - minVal) * scale;
+        }
+    }
+
+    // Vectorized gamma.
+    color = pow(color, vec3<f32>(params.gamma));
+
+    // Vectorized contrast with final clamp.
+    color = saturate((color - 0.5) * params.contrast + 0.5);
+
+    return color;
+}
+
+@fragment
+fn fragmentMainDensity(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+    // Floating origin: center + relative offset keeps intermediates small.
+    let relX = (uv.x - 0.5) * params.width  / params.viewScale;
+    let relY = (uv.y - 0.5) * params.height / params.viewScale;
+
+    // Add relative offset to CPU-computed center.
+    let bufferX = params.viewBufferCenterX + relX;
+    let bufferY = params.viewBufferCenterY + relY;
+
+    if (bufferX < 0.0 || bufferX >= params.width || bufferY < 0.0 || bufferY >= params.height) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+
+    let x = u32(clamp(bufferX, 0.0, params.width - 1.0));
+    let y = u32(clamp(bufferY, 0.0, params.height - 1.0));
+    let index = y * u32(params.width) + x;
+
+    let count = densityRead[index];
+    if (count == 0u) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+
+    let invTotal: f32 = params.invTotal;
+    let densityBrightnessScale = 250.0;
+    let val = f32(count) * invTotal * densityBrightnessScale;
+
+    // Density-only mode (ACES for consistency).
+    let mapped = toneMapACES(vec3<f32>(val), params.exposure).r;
+    let gray = pow(mapped, params.gamma);
+    let contrasted = saturate((gray - 0.5) * params.contrast + 0.5);
+    let col = getGradient(contrasted);
+    return vec4<f32>(col, 1.0);
+}
+
 @fragment
 fn fragmentMain(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    let baseScale = min(params.width, params.height) * 0.2;
-    let screenX = uv.x * params.width;
-    let screenY = uv.y * params.height;
-    
-    let bufferX = (screenX - params.width * 0.5) / params.viewScale - params.viewOffsetX * baseScale + params.width * 0.5;
-    let bufferY = (screenY - params.height * 0.5) / params.viewScale - params.viewOffsetY * baseScale + params.height * 0.5;
-    
+    // Floating origin: center + relative offset keeps intermediates small.
+    let relX = (uv.x - 0.5) * params.width  / params.viewScale;
+    let relY = (uv.y - 0.5) * params.height / params.viewScale;
+
+    // Add relative offset to CPU-computed center.
+    let bufferX = params.viewBufferCenterX + relX;
+    let bufferY = params.viewBufferCenterY + relY;
+
     if (bufferX < 0.0 || bufferX >= params.width || bufferY < 0.0 || bufferY >= params.height) {
         return vec4<f32>(0.0, 0.0, 0.0, 1.0);
     }
@@ -403,81 +776,43 @@ fn fragmentMain(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     let index = y * u32(params.width) + x;
     
     let count = densityRead[index];
-    let log2Total: f32 = params.totalIterations;
-    let safeLog2Total: f32 = max(log2Total, f32(-50.0));
-    let negLog2Total: f32 = -safeLog2Total;
-    let invTotal: f32 = pow(f32(2.0), negLog2Total);
+    
+    // Early-out for empty pixels.
+    if (count == 0u) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    
+    // invTotal precomputed on CPU.
+    let invTotal: f32 = params.invTotal;
     let densityBrightnessScale = 250.0;
     
     var col: vec3<f32>;
     
-    if (params.colorMethod == 5u && count > 0u) {
-        let rAvg = bitcast<f32>(colorReadR[index]);
-        let gAvg = bitcast<f32>(colorReadG[index]);
-        let bAvg = bitcast<f32>(colorReadB[index]);
-        let density: f32 = f32(count) * invTotal;
+    if (params.colorMethod >= 1u && count > 0u) {
+        let colorAvg = vec3<f32>(
+            bitcast<f32>(colorReadR[index]),
+            bitcast<f32>(colorReadG[index]),
+            bitcast<f32>(colorReadB[index])
+        );
+
+        let density = f32(count) * invTotal;
         const BRIGHTNESS_SCALE: f32 = 250.0;
-        var rVal = rAvg * density * BRIGHTNESS_SCALE;
-        var gVal = gAvg * density * BRIGHTNESS_SCALE;
-        var bVal = bAvg * density * BRIGHTNESS_SCALE;
-        
-        rVal = (rVal * params.exposure) / (1.0 + rVal * params.exposure);
-        gVal = (gVal * params.exposure) / (1.0 + gVal * params.exposure);
-        bVal = (bVal * params.exposure) / (1.0 + bVal * params.exposure);
-        
-        rVal = pow(clamp(rVal, 0.0, 1.0), params.gamma);
-        gVal = pow(clamp(gVal, 0.0, 1.0), params.gamma);
-        bVal = pow(clamp(bVal, 0.0, 1.0), params.gamma);
-        
-        let contrastFactor: f32 = params.contrast;
-        rVal = clamp((rVal - 0.5) * contrastFactor + 0.5, 0.0, 1.0);
-        gVal = clamp((gVal - 0.5) * contrastFactor + 0.5, 0.0, 1.0);
-        bVal = clamp((bVal - 0.5) * contrastFactor + 0.5, 0.0, 1.0);
-        
-        col = vec3<f32>(rVal, gVal, bVal);
-    } else if (params.colorMethod >= 1u && count > 0u) {
-        let rAvg = bitcast<f32>(colorReadR[index]);
-        let gAvg = bitcast<f32>(colorReadG[index]);
-        let bAvg = bitcast<f32>(colorReadB[index]);
-        let density: f32 = f32(count) * invTotal;
-        const BRIGHTNESS_SCALE: f32 = 250.0;
-        var rVal = rAvg * density * BRIGHTNESS_SCALE;
-        var gVal = gAvg * density * BRIGHTNESS_SCALE;
-        var bVal = bAvg * density * BRIGHTNESS_SCALE;
-        
-        rVal = (rVal * params.exposure) / (1.0 + rVal * params.exposure);
-        gVal = (gVal * params.exposure) / (1.0 + gVal * params.exposure);
-        bVal = (bVal * params.exposure) / (1.0 + bVal * params.exposure);
-        
-        let maxVal = max(max(rVal, gVal), bVal);
-        let minVal = min(min(rVal, gVal), bVal);
-        let delta = maxVal - minVal;
-        if (delta > 0.001 && maxVal > 0.001) {
-            let saturation = delta / maxVal;
-            let newSaturation = min(1.0, saturation * 1.5);
-            let scale = newSaturation / saturation;
-            rVal = minVal + (rVal - minVal) * scale;
-            gVal = minVal + (gVal - minVal) * scale;
-            bVal = minVal + (bVal - minVal) * scale;
-        }
-        
-        rVal = pow(clamp(rVal, 0.0, 1.0), params.gamma);
-        gVal = pow(clamp(gVal, 0.0, 1.0), params.gamma);
-        bVal = pow(clamp(bVal, 0.0, 1.0), params.gamma);
-        
-        let contrastFactor: f32 = params.contrast;
-        rVal = clamp((rVal - 0.5) * contrastFactor + 0.5, 0.0, 1.0);
-        gVal = clamp((gVal - 0.5) * contrastFactor + 0.5, 0.0, 1.0);
-        bVal = clamp((bVal - 0.5) * contrastFactor + 0.5, 0.0, 1.0);
-        
-        col = vec3<f32>(rVal, gVal, bVal);
+
+        let boostSat = params.colorMethod != 5u;
+
+        col = applyToneMapping(
+            colorAvg.r * density * BRIGHTNESS_SCALE,
+            colorAvg.g * density * BRIGHTNESS_SCALE,
+            colorAvg.b * density * BRIGHTNESS_SCALE,
+            boostSat
+        );
     } else {
-        var val = f32(count) * invTotal * densityBrightnessScale;
-        val = (val * params.exposure) / (1.0 + val * params.exposure);
-        val = clamp(val, 0.0, 1.0);
-        val = pow(val, params.gamma);
-        val = clamp((val - 0.5) * params.contrast + 0.5, 0.0, 1.0);
-        col = getGradient(val);
+        // Density-only mode (ACES for consistency).
+        let val = f32(count) * invTotal * densityBrightnessScale;
+        let mapped = toneMapACES(vec3<f32>(val), params.exposure).r;
+        let gray = pow(mapped, params.gamma);
+        let contrasted = saturate((gray - 0.5) * params.contrast + 0.5);
+        col = getGradient(contrasted);
     }
 
     return vec4<f32>(col, 1.0);
