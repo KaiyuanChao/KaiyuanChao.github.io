@@ -9,6 +9,10 @@ Interactive Peter de Jong attractor renderer using WebGPU compute + fragment sha
 
 ## Quick Start
 
+This link is up temporarily for one-click testing: https://kaiyuanchao.github.io/ExoticFractalPlotter.html
+
+To run locally:
+
 1. Install dependencies:
    
    ```bash
