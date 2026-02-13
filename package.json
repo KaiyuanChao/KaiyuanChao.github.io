@@ -1,0 +1,38 @@
+{
+  "name": "exotic-fractal-plotter",
+  "version": "1.0.0",
+  "description": "WebGPU-based Peter de Jong strange attractor fractal renderer with real-time accumulation, pan/zoom controls, and multiple coloring modes",
+  "type": "module",
+  "scripts": {
+    "start": "npx http-server . -p 3000 -o",
+    "serve": "npx http-server . -p 3000",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test:r2": "node test-generator.js r2 --samples 8192 --width 800 --height 800",
+    "test:r2:300k": "node test-generator.js r2 --samples 8192 --iterations 37 --width 800 --height 800 --output r2_300k.png",
+    "test:r2:300k:zoom4": "node test-generator.js r2 --samples 8192 --iterations 37 --width 800 --height 800 --zoom 4 --output r2_300k_zoom4.png",
+    "test:sobol": "node test-generator.js sobol --samples 8192 --width 800 --height 800",
+    "test:sobol:300k": "node test-generator.js sobol --samples 8192 --iterations 37 --width 800 --height 800 --output sobol_300k.png",
+    "test:all:300k": "node test-all-methods.js --samples 8192 --iterations 37",
+    "test:r2:zoom4": "node test-generator.js r2 --samples 8192 --width 800 --height 800 --zoom 4 --output r2_zoom4.png",
+    "test:all": "node test-generator.js r2 --samples 8192 && node test-generator.js sobol --samples 8192 && node test-generator.js lcg --samples 8192"
+  },
+  "keywords": [
+    "webgpu",
+    "fractal",
+    "attractor",
+    "shader",
+    "visualization"
+  ],
+  "author": "ExoticFractalPlotter contributors",
+  "license": "MIT",
+  "dependencies": {
+    "jimp": "^0.22.12"
+  },
+  "devDependencies": {
+    "http-server": "^14.1.1",
+    "@eslint/js": "^9.39.2",
+    "eslint": "^9.39.2",
+    "globals": "^15.15.0"
+  }
+}
