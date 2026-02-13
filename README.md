@@ -1,179 +1,121 @@
 # ExoticFractalPlotter
 
-A high-performance WebGPU-based strange attractor fractal renderer featuring real-time progressive accumulation, interactive pan/zoom controls, and multiple coloring modes. Renders the Peter de Jong attractor with millions of iterations per frame using GPU compute shaders.
-
-Play with it here - temporary test URL: https://kaiyuanchao.github.io/
-
-## Features
-
-- **Real-time Progressive Rendering**: Accumulates fractal points over time with stable averaging
-- **WebGPU Acceleration**: Leverages GPU compute shaders for parallel point generation
-- **Interactive Controls**: Pan, zoom, and adjust rendering parameters in real-time
-- **Multiple Coloring Modes**: Density-based, iteration-based, and custom color palettes
-- **Progressive Refinement**: Stable averages with bounded precision, no quantization artifacts
-- **View Transform System**: Pan and zoom without re-accumulation
-- **Rebase System**: Bake view transforms into fractal parameters for optimal performance
-- **Adaptive Performance**: Automatically scales workgroup count based on GPU capabilities
-- **Export Functionality**: Save high-resolution renders with embedded metadata
+Interactive Peter de Jong attractor renderer using WebGPU compute + fragment shaders, with automatic CPU fallback.
 
 ## Requirements
 
-- Modern browser with WebGPU support:
-  - Chrome/Edge 113+ (Windows/Linux/Mac)
-  - Firefox 110+ (Windows/Linux/Mac)
-  - Safari 18+ (Mac/iOS)
-- WebGPU-compatible GPU (discrete or integrated)
+- Node.js 18+ (for `npm` scripts)
+- A modern browser with WebGPU support for GPU mode
 
-## Installation
+## Quick Start
 
-1. Clone or download this repository
-2. Install dependencies:
+1. Install dependencies:
+   
    ```bash
    npm install
    ```
-3. Start the development server:
+
+2. Start local server:
+   
    ```bash
    npm start
    ```
-   This will open the application in your default browser at `http://localhost:3000`
 
-Alternatively, use any static file server to serve the `ExoticFractalPlotter.html` file.
+3. Open:
+   `http://localhost:3000/ExoticFractalPlotter.html`
 
-## Usage
+Notes:
 
-### Basic Controls
+- Serve over `http://` or `https://` (not `file://`), because the app loads module JS and WGSL at runtime.
+- `npm start` opens the browser. `npm run serve` starts the same server without auto-open.
 
-- **Variable A, B, C, D**: Adjust the attractor parameters to explore different fractal patterns
-- **Exposure**: Control overall brightness
-- **Gamma**: Adjust midtone contrast
-- **Contrast**: Fine-tune image contrast
-- **Color Mode**: Switch between different coloring methods:
-  - Default: Density-based heat map
-  - Classic: Velocity-based coloring
-  - Exotic/Vibrant/Surprise: RGB channel permutations
-  - Iteration Hues: Logarithmic iteration count to color mapping
+## Required Runtime Files
 
-### Interactive Features
+```text
+ExoticFractalPlotter.html
+js/exotic-fractalplotter.js
+shaders/fractal-accumulation.wgsl
+```
 
-- **Pan**: Click and drag to pan the view
-- **Zoom**: Use mouse wheel to zoom in/out
-- **Rebase**: Click "Rebase" to bake the current view transform into fractal parameters (improves performance)
-- **Reset**: Reset view to original bounds
-- **Randomize**: Generate random parameter values
-- **Attract Mode**: Automatically cycle through parameter variations
-- **Clear**: Reset accumulation and start fresh
+Optional:
 
-### Presets
+- `favicon.svg`
 
-Select from predefined parameter sets:
-- Classic
-- Swirl
-- Dream
-- Chaos
-- Spiral
-- Vortex
+## How To Use
 
-### Export
+UI controls:
 
-- **Save Screen**: Save the current viewport as PNG
-- **Load Fractal**: Load fractal parameters from PNG metadata
+- `Variable A/B/C/D`: attractor parameters
+- `Exposure`, `Gamma`, `Contrast`: tone controls
+- `Color Mode`: density or trajectory color methods
+- `Rebase`: make current view the new full bounds
+- `Reset`: reset view/bounds
+- `Randomize`: random parameter exploration
+- `Animate`: continuous parameter motion
+- `Clear`: clear accumulation
+- `Save Screen`: export PNG with embedded state metadata
+- `Load Fractal`: load state from a PNG saved by this app
 
-## Architecture
+Mouse:
 
-### Compute Shader Pipeline
+- Drag: pan
+- Wheel: zoom toward cursor
 
-1. **Point Generation**: Each GPU thread generates 128 iterations of the attractor equation
-2. **Atomic Accumulation**: Points are accumulated into density and color buffers using atomic operations
-3. **Running Average**: Color values use running average accumulation for stable, bounded precision
-4. **Progressive Refinement**: Accumulation continues over time, refining the image quality
+Button modifiers:
 
-### Rendering Pipeline
+- `Shift + Rebase`: reset view transform to 1:1 (preserve pixels)
+- `Ctrl/Cmd + Rebase`: toggle auto-rebase
+- `Shift + Reset`: also reset exposure/gamma/contrast to defaults
+- `Ctrl/Cmd + Randomize`: history back
+- `Shift + Randomize`: subtle cycle
+- `Alt + Randomize`: micro cycle
+- `Shift + Animate`: slow animate
+- `Ctrl/Cmd + Animate`: ultra-slow animate
 
-1. **Fragment Shader**: Reads accumulated density and color buffers
-2. **Tone Mapping**: Applies Reinhard tone mapping for HDR compression
-3. **Post-processing**: Gamma correction and contrast adjustment
-4. **Display**: Renders to screen with view transform applied
+## Keyboard Shortcuts
 
-### Performance Optimization
+- `Space` or `A`: toggle animate
+- `R`: reverse animate direction (when animate is active)
+- `G`: cycle RNG mode
+- `B`: rebase
+- `Shift+B` or `Shift+R`: reset view transform to 1:1 (preserve pixels)
+- `Ctrl+S` / `Cmd+S`: new RNG seed (keeps accumulation)
+- `F1`: toggle help overlay
+- `Esc`: close help overlay
+- `Shift+C`: run calibration benchmark (base reproducible seed)
+- `Alt+C`: run calibration benchmark (alternate reproducible seed)
 
-- **Adaptive Workgroup Scaling**: Automatically adjusts workgroup count based on GPU performance
-- **Stochastic Color Updates**: Reduces atomic contention on hot pixels
-- **View Transform Caching**: Pan/zoom operations don't require re-accumulation
-- **Frame Budget Management**: Maintains target framerate by adjusting iteration count
+## CPU Fallback
 
-## Technical Details
-
-### Shader Files
-
-- `shaders/fractal-accumulation.wgsl`: Main compute and render shaders
-- `shaders/downsample.wgsl`: Supersampling downsampling shader
-
-### Key Algorithms
-
-- **Peter de Jong Attractor**: `x' = sin(a·y) - cos(b·x)`, `y' = sin(c·x) - cos(d·y)`
-- **Quasi-Random Sampling**: Supports Sobol sequences and R2 sequences for uniform coverage
-- **Running Average**: `newAvg = oldAvg + (sample - oldAvg) / count`
-- **Reinhard Tone Mapping**: `L_out = L_in / (1 + L_in)` for stable HDR compression
-
-### Browser Compatibility
-
-The renderer uses WebGPU features that require strict WGSL compliance. The shader code is compatible with:
-- Chrome/Dawn (lenient validation)
-- Firefox/Naga (strict validation)
-
-All atomic operations are inlined to comply with WGSL specification requirements.
+- If WebGPU is unavailable, the app automatically runs in CPU mode.
+- Force CPU mode manually with:
+  `http://localhost:3000/ExoticFractalPlotter.html?forceCPU=true`
 
 ## Development
 
-### Project Structure
+No build step is required.
 
-```
-ExoticFractalPlotter.html    # Main application
-shaders/
-  ├── fractal-accumulation.wgsl  # Compute and render shaders
-  └── downsample.wgsl             # Supersampling shader
-package.json                      # Dependencies and scripts
-```
+Useful scripts:
 
-### Building
+- `npm run lint`
+- `npm run lint:fix`
+- `npm run test:all`
+- `npm run test:all:300k`
+- `npm run test:r2`
+- `npm run test:sobol`
 
-No build step required. The application runs directly in the browser.
+## Architecture (Short)
 
-### Testing
+- `js/exotic-fractalplotter.js` orchestrates UI, state, WebGPU setup, and CPU fallback.
+- `shaders/fractal-accumulation.wgsl` contains:
+  - compute entry points for accumulation
+  - vertex + fragment entry points for rendering
 
-Run test scripts for RNG generators:
-```bash
-npm run test:all
-```
+Core map:
+
+- `x' = sin(a*y) - cos(b*x)`
+- `y' = sin(c*x) - cos(d*y)`
 
 ## License
 
-MIT License
-
-Copyright (c) 2025
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-## Acknowledgments
-
-- WebGPU API specification and browser implementations
-- Peter de Jong for the attractor equations
-- Sobol sequence research and implementations
-- R2 sequence (Martin Roberts) for optimal 2D low-discrepancy sequences
-
+MIT (`LICENSE`).
